@@ -14,8 +14,8 @@ build_dag_batch / DAG_reduction / server_state_generator 等均已删除）。
    使 DAG 连通成"一个任务"，且出度严格不超过 max_out；
 4. 为每个子任务生成输入数据量、计算量，为每条依赖边生成中间结果数据量。
 
-随机性统一使用 numpy 的 Generator（单一随机流），
-通过 DAGGenerator(seed=...) 即可完全复现生成结果。
+随机性统一使用 numpy 的 Generator（单一随机流），不固定随机种子；
+如需复现实验结果，可在外部统一设置 numpy 全局随机种子。
 """
 
 import math
@@ -54,20 +54,18 @@ class DAGGenerator:
     """DAG 任务生成器。
 
     用法示例：
-        generator = DAGGenerator()             # 使用默认配置，随机种子不定
-        generator = DAGGenerator(seed=42)      # 固定随机种子，结果可复现
+        generator = DAGGenerator()             # 使用默认配置
         dag  = generator.generate_dag()        # 生成一个 DAG 任务
         dags = generator.generate_dags(10)     # 批量生成 10 个 DAG 任务
 
     Args:
-        config: DAG 生成参数，默认为 DEFAULT_DAG_CONFIG；
-        seed:   随机种子，传入后生成结果完全可复现。
+        config: DAG 生成参数，默认为 DEFAULT_DAG_CONFIG。
     """
 
-    def __init__(self, config: Optional[DAGConfig] = None, seed: Optional[int] = None):
+    def __init__(self, config: Optional[DAGConfig] = None):
         self.config = config or DEFAULT_DAG_CONFIG
-        # 统一使用单一随机流，避免原逻辑中 np.random 与 random 混用导致无法复现
-        self._rng = np.random.default_rng(seed)
+        # 统一使用单一随机流，避免 np.random 与 random 两个模块混用
+        self._rng = np.random.default_rng()
 
     # ------------------------------------------------------------------ #
     # DAG 拓扑生成
@@ -287,7 +285,7 @@ if __name__ == "__main__":
         print(f"  出度超过最大出度: {bad_out_degree}")
 
     # 示例：生成并打印一个 DAG
-    example = DAGGenerator(seed=42).generate_dag()
+    example = DAGGenerator().generate_dag()
     topo = example.topology
     print("===== 单个 DAG 示例（默认参数）=====")
     print(f"层数: {len(topo.layer_sizes)}，各层节点数: {topo.layer_sizes}")
@@ -299,7 +297,7 @@ if __name__ == "__main__":
 
     # 自检：默认参数
     print("\n===== 自检：默认参数（5000 个 DAG）=====")
-    _self_check(DAGGenerator(seed=42))
+    _self_check(DAGGenerator())
 
     # 自检：极端参数（多而窄的层、节点数波动大）
     extreme_cfg = DAGConfig(
@@ -308,15 +306,4 @@ if __name__ == "__main__":
     )
     print("\n===== 自检：极端参数（{} 个 DAG）=====".format(extreme_cfg))
     print(f"  配置: {extreme_cfg}")
-    _self_check(DAGGenerator(extreme_cfg, seed=42))
-
-    # 自检：可复现性（相同种子生成结果一致）
-    dag_a = DAGGenerator(seed=7).generate_dag()
-    dag_b = DAGGenerator(seed=7).generate_dag()
-    same = (
-        dag_a.topology.edges == dag_b.topology.edges
-        and np.array_equal(dag_a.node_data_sizes, dag_b.node_data_sizes)
-        and np.array_equal(dag_a.node_cpu_cycles, dag_b.node_cpu_cycles)
-    )
-    print("\n===== 可复现性（相同种子）=====")
-    print(f"  两次生成结果一致: {same}")
+    _self_check(DAGGenerator(extreme_cfg))
