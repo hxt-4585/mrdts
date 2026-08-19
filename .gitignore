@@ -10,3 +10,7 @@ venv/
 
 # 生成产物
 figs/
+scripts/output/
+
+# Claude Code 内部目录
+.claude/
