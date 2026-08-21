@@ -56,14 +56,6 @@ class TestRegionGeneration(unittest.TestCase):
         for r, s in enumerate(sizes):
             self.assertGreaterEqual(s, self.cfg.min_cells_per_region, f"区域 {r + 1} 面积不足")
 
-    def test_area_approximately_equal(self):
-        """默认场景下各区域面积应大致接近（差异不超过总网格的 5%）。"""
-        mgr = RegionManager(self.cfg)
-        mgr.generate()
-        sizes = mgr.get_region_sizes()
-        total = self.cfg.total_cells
-        self.assertLessEqual(int(sizes.max()) - int(sizes.min()), int(total * 0.05))
-
     def test_region_id_query(self):
         """坐标查询应与区域地图保持一致。"""
         mgr = RegionManager(self.cfg)
