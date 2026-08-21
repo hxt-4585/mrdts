@@ -1,0 +1,10 @@
+[project]
+name = "mrdts"
+version = "0.1.0"
+description = "Multi-Region Distributed Task Scheduling simulation environment"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "matplotlib>=3.8",
+    "networkx>=3.2",
+    "numpy>=1.26",
+]

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from env.config import DAGConfig
+from env.settings import DAGConfig
 
 
 @dataclass
@@ -40,7 +40,10 @@ class DAGGenerator:
 
     def __init__(self, config=None):
         # 允许传入自定义配置，便于后续按区域差异调整 DAG 复杂度
-        self.config = config if config is not None else DAGConfig()
+        self.config = config if config is not None else DAGConfig.default()
+        # DAG 使用实例私有随机流，不受其他模块的全局随机状态影响。
+        self._np_rng = np.random.default_rng(self.config.seed)
+        self._py_rng = random.Random(self.config.seed)
 
     # ------------------------------ DAG 拓扑生成 ------------------------------ #
     def _generate_layers(self, n, rho, delta):
@@ -55,7 +58,7 @@ class DAGGenerator:
         mean = n / length
 
         # 各层节点数（至少 1 个节点）
-        sizes = [max(1, round(s)) for s in np.random.normal(mean, delta, length)]
+        sizes = [max(1, round(s)) for s in self._np_rng.normal(mean, delta, length)]
 
         # 修正节点总数，使 sum(sizes) == n
         diff = n - sum(sizes)
@@ -92,8 +95,8 @@ class DAGGenerator:
             next_layer = layers[i + 1]
             for u in layers[i]:
                 # 出度限制在 [1, min(max_out, 下一层节点数)] 之间
-                out_degree = random.randint(1, min(max_out, len(next_layer)))
-                for v in random.sample(next_layer, out_degree):
+                out_degree = self._py_rng.randint(1, min(max_out, len(next_layer)))
+                for v in self._py_rng.sample(next_layer, out_degree):
                     edges.append((u, v))
 
         return edges
@@ -122,11 +125,13 @@ class DAGGenerator:
         """
         cfg = self.config
         # 输入数据量 (KB)：整数，[low, high] 闭区间均匀随机
-        input_data = np.random.randint(
+        input_data = self._np_rng.integers(
             cfg.input_data_range[0], cfg.input_data_range[1] + 1, size=(node_num, 1)
         )
         # 计算量 (CPU cycles)：连续均匀随机
-        cpu_cycles = np.random.uniform(cfg.cpu_range[0], cfg.cpu_range[1], size=(node_num, 1))
+        cpu_cycles = self._np_rng.uniform(
+            cfg.cpu_range[0], cfg.cpu_range[1], size=(node_num, 1)
+        )
         return np.hstack((input_data, cpu_cycles))
 
     def generate_edge_features(self, edges):
@@ -141,7 +146,7 @@ class DAGGenerator:
         cfg = self.config
         edge_features = {}
         for u, v in edges:
-            edge_features[(u, v)] = random.randint(
+            edge_features[(u, v)] = self._py_rng.randint(
                 cfg.intermediate_data_range[0], cfg.intermediate_data_range[1]
             )
         return edge_features

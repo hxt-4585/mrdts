@@ -10,6 +10,7 @@
 
 import os
 import sys
+from dataclasses import replace
 
 import matplotlib
 
@@ -20,7 +21,7 @@ import networkx as nx
 # 将项目根目录加入 sys.path，便于导入 env 包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from env.config import DAGConfig
+from env.settings import DAGConfig
 from env.graph_utils import DAGGenerator
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -85,8 +86,7 @@ def draw_rho_comparison(rho_list, path):
     axes = axes.flatten() if rows * cols > 1 else [axes]
 
     for ax, rho in zip(axes, rho_list):
-        cfg = DAGConfig()
-        cfg.rho = rho
+        cfg = replace(DAGConfig.default(), rho=rho)
         dag = DAGGenerator(cfg).generate_single_dag()
         g, pos = _layered_pos(dag)
 
@@ -114,7 +114,7 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # 1. 默认参数的单个 DAG（含特征）
-    default_cfg = DAGConfig()
+    default_cfg = DAGConfig.default()
     dag = DAGGenerator(default_cfg).generate_single_dag()
     draw_single(
         dag,

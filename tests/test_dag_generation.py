@@ -5,16 +5,16 @@
 """
 
 import os
-import random
 import sys
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
 # 将项目根目录加入 sys.path，便于导入 env 包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from env.config import DAGConfig
+from env.settings import DAGConfig
 from env.graph_utils import DAGGenerator
 
 
@@ -22,7 +22,7 @@ class TestDAGGeneration(unittest.TestCase):
     """DAG 生成器的正确性测试。"""
 
     def setUp(self):
-        self.cfg = DAGConfig()
+        self.cfg = DAGConfig.default()
         self.gen = DAGGenerator(self.cfg)
 
     def test_node_num(self):
@@ -84,8 +84,7 @@ class TestDAGGeneration(unittest.TestCase):
     def test_extreme_rho_no_hang(self):
         """极端 rho 取值下不应死循环（旧实现存在此缺陷）。"""
         for rho in [0.1, 0.3, 0.5, 1.0, 1.5, 2.0, 3.0]:
-            cfg = DAGConfig()
-            cfg.rho = rho
+            cfg = replace(self.cfg, rho=rho)
             gen = DAGGenerator(cfg)
             dag = gen.generate_single_dag()
             self.assertEqual(dag.node_num, cfg.n)
@@ -96,9 +95,7 @@ class TestDAGGeneration(unittest.TestCase):
         """固定随机种子后，生成结果应可复现。"""
 
         def gen_one():
-            np.random.seed(42)
-            random.seed(42)
-            dag = DAGGenerator(DAGConfig()).generate_single_dag()
+            dag = DAGGenerator(DAGConfig.default()).generate_single_dag()
             return list(dag.edges), dag.node_features.copy(), dict(dag.edge_features)
 
         edges_a, feats_a, edge_feats_a = gen_one()
