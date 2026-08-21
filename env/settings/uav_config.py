@@ -51,9 +51,6 @@ class UAVConfig:
             data = tomllib.load(file)
         master = data["master"]
         member = data["member"]
-        propulsion = member["propulsion"]
-        computation = member["computation"]
-        communication = member["communication"]
         bs = data["bs"]
         return cls(
             master_uav_count=master["uav_count"],
@@ -67,16 +64,16 @@ class UAVConfig:
             member_core_count=member["core_count"],
             member_core_frequency=member["core_frequency"],
             member_propulsion=MemberPropulsionConfig(
-                u1=propulsion["u1"],
-                u2=propulsion["u2"],
-                u3=propulsion["u3"],
-                u4=propulsion["u4"],
-                u5=propulsion["u5"],
-                tip_speed=propulsion["tip_speed"],
+                u1=member["u1"],
+                u2=member["u2"],
+                u3=member["u3"],
+                u4=member["u4"],
+                u5=member["u5"],
+                tip_speed=member["tip_speed"],
             ),
-            member_capacitance_factor=computation["capacitance_factor"],
-            member_coverage_radius=communication["coverage_radius"],
-            member_transmit_power=communication["transmit_power"],
+            member_capacitance_factor=member["capacitance_factor"],
+            member_coverage_radius=member["coverage_radius"],
+            member_transmit_power=member["transmit_power"],
             bs_altitude=bs["altitude"],
             bs_core_count=bs["core_count"],
             bs_core_frequency=bs["core_frequency"],

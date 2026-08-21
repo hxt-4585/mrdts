@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import random
+import tomllib
 import unittest
 
 import numpy as np
@@ -53,6 +54,19 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.member_capacitance_factor, 1e-28)
         self.assertEqual(config.member_coverage_radius, 180.0)
         self.assertEqual(config.member_transmit_power, 1.0)
+
+    def test_member_physical_parameters_are_not_nested_in_toml_groups(self):
+        """Member 的物理参数应直接位于 [member]，便于统一查阅。"""
+        with (PROJECT_ROOT / "config" / "uav.toml").open("rb") as file:
+            member = tomllib.load(file)["member"]
+
+        self.assertNotIn("propulsion", member)
+        self.assertNotIn("computation", member)
+        self.assertNotIn("communication", member)
+        self.assertEqual(member["u1"], 85.0)
+        self.assertEqual(member["capacitance_factor"], 1e-28)
+        self.assertEqual(member["coverage_radius"], 180.0)
+        self.assertEqual(member["transmit_power"], 1.0)
 
     def test_dag_and_region_use_distinct_seeds(self):
         region = RegionConfig.from_toml(PROJECT_ROOT / "config" / "region.toml")
