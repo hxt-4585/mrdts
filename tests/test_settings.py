@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from env.settings import DAGConfig, RegionConfig, UserConfig
+from env.settings import DAGConfig, RegionConfig, UAVConfig, UserConfig
 from env.dag_generator import DAGGenerator
 
 
@@ -39,6 +39,20 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.center_bias, 0.85)
         self.assertEqual(config.center_spread_ratio, 0.25)
         self.assertEqual(config.seed, 60)
+
+    def test_uav_config_loads_member_energy_and_communication_parameters(self):
+        """推进、计算与通信参数应只作为 Member UAV 的类型化配置加载。"""
+        config = UAVConfig.from_toml(PROJECT_ROOT / "config" / "uav.toml")
+
+        self.assertEqual(config.member_propulsion.u1, 85.0)
+        self.assertEqual(config.member_propulsion.u2, 0.131)
+        self.assertEqual(config.member_propulsion.u3, 0.16)
+        self.assertEqual(config.member_propulsion.u4, 0.0115)
+        self.assertEqual(config.member_propulsion.u5, 76.0)
+        self.assertEqual(config.member_propulsion.tip_speed, 110.0)
+        self.assertEqual(config.member_capacitance_factor, 1e-28)
+        self.assertEqual(config.member_coverage_radius, 180.0)
+        self.assertEqual(config.member_transmit_power, 1.0)
 
     def test_dag_and_region_use_distinct_seeds(self):
         region = RegionConfig.from_toml(PROJECT_ROOT / "config" / "region.toml")

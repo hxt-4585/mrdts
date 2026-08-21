@@ -6,6 +6,18 @@ import tomllib
 
 
 @dataclass(frozen=True)
+class MemberPropulsionConfig:
+    """Member UAV 旋翼推进功率模型的参数。"""
+
+    u1: float
+    u2: float
+    u3: float
+    u4: float
+    u5: float
+    tip_speed: float
+
+
+@dataclass(frozen=True)
 class UAVConfig:
     """两类 UAV 共用的配置入口。"""
 
@@ -19,6 +31,10 @@ class UAVConfig:
     max_horizontal_speed: float
     member_core_count: int
     member_core_frequency: float
+    member_propulsion: MemberPropulsionConfig
+    member_capacitance_factor: float
+    member_coverage_radius: float
+    member_transmit_power: float
     bs_altitude: float
     bs_core_count: int
     bs_core_frequency: float
@@ -35,6 +51,9 @@ class UAVConfig:
             data = tomllib.load(file)
         master = data["master"]
         member = data["member"]
+        propulsion = member["propulsion"]
+        computation = member["computation"]
+        communication = member["communication"]
         bs = data["bs"]
         return cls(
             master_uav_count=master["uav_count"],
@@ -47,6 +66,17 @@ class UAVConfig:
             max_horizontal_speed=member["max_horizontal_speed"],
             member_core_count=member["core_count"],
             member_core_frequency=member["core_frequency"],
+            member_propulsion=MemberPropulsionConfig(
+                u1=propulsion["u1"],
+                u2=propulsion["u2"],
+                u3=propulsion["u3"],
+                u4=propulsion["u4"],
+                u5=propulsion["u5"],
+                tip_speed=propulsion["tip_speed"],
+            ),
+            member_capacitance_factor=computation["capacitance_factor"],
+            member_coverage_radius=communication["coverage_radius"],
+            member_transmit_power=communication["transmit_power"],
             bs_altitude=bs["altitude"],
             bs_core_count=bs["core_count"],
             bs_core_frequency=bs["core_frequency"],

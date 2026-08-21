@@ -22,6 +22,26 @@ core_count = 2
 # 每个 Member 计算核心的频率（CPU cycles/s）。
 core_frequency = 10000000000.0
 
+[member.propulsion]
+# 旋翼推进功率模型参数。
+u1 = 85.0
+u2 = 0.131
+u3 = 0.16
+u4 = 0.0115
+u5 = 76.0
+# 转子叶尖速度（m/s）。
+tip_speed = 110.0
+
+[member.computation]
+# 本地计算能耗模型的电容系数。
+capacitance_factor = 1e-28
+
+[member.communication]
+# 以 Member UAV 为球心的三维通信覆盖半径（m）。
+coverage_radius = 180.0
+# Member UAV 的发射功率（W）。
+transmit_power = 1.0
+
 [bs]
 # 全局固定 BS 的天线高度（m）。水平坐标由环境几何中心确定。
 altitude = 25.0
