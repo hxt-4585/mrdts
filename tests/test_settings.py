@@ -6,8 +6,8 @@ import unittest
 
 import numpy as np
 
-from env.settings import DAGConfig, RegionConfig
-from env.graph_utils import DAGGenerator
+from env.settings import DAGConfig, RegionConfig, UserConfig
+from env.dag_generator import DAGGenerator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +28,15 @@ class TestSettings(unittest.TestCase):
     def test_default_configs_load_repository_toml_files(self):
         self.assertEqual(RegionConfig.default().grid_size, 100)
         self.assertEqual(DAGConfig.default().n, 10)
+        self.assertEqual(UserConfig.default().total_users, 100)
+
+    def test_user_config_loads_population_parameters(self):
+        config = UserConfig.from_toml(PROJECT_ROOT / "config" / "user.toml")
+
+        self.assertEqual(config.total_users, 100)
+        self.assertEqual(config.min_users_per_region, 1)
+        self.assertEqual(config.area_fluctuation, 0.1)
+        self.assertEqual(config.seed, 60)
 
     def test_dag_and_region_use_distinct_seeds(self):
         region = RegionConfig.from_toml(PROJECT_ROOT / "config" / "region.toml")

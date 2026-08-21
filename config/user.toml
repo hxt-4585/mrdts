@@ -1,0 +1,9 @@
+[population]
+# 全局地面用户总数。
+total_users = 100
+# 每个区域至少分配的用户数量。
+min_users_per_region = 1
+# 按区域面积分配用户时施加的相对浮动上限，例如 0.1 表示 ±10%。
+area_fluctuation = 0.1
+# 用户位置与区域用户数分配使用的独立随机种子。
+seed = 60

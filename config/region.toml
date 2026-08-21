@@ -10,7 +10,7 @@ region_count = 4
 # 单个子区域占全部网格的最小比例，用于避免区域面积过小。
 min_area_ratio = 0.1
 # 子区域面积差异强度；0 表示尽量均衡，越接近 1 面积差异越明显。
-area_imbalance = 0.8
+area_imbalance = 0.5
 # Lloyd 迭代次数；越大，区域越接近紧凑的质心 Voronoi 分区。
 lloyd_iterations = 20
 # 每次 Lloyd 迭代中调整种子权重以逼近目标面积的最大次数。

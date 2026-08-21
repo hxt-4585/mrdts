@@ -14,8 +14,8 @@ import numpy as np
 from env.settings import RegionConfig
 
 
-class RegionManager:
-    """区域划分管理器：生成区域地图、查询实体区域归属、校验与存取。"""
+class Region:
+    """区域实体：生成区域地图、查询实体区域归属、校验与存取。"""
 
     def __init__(self, config=None):
         self.config = config if config is not None else RegionConfig.default()

@@ -23,7 +23,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from env.settings import RegionConfig
-from env.region import RegionManager
+from env.region import Region
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
@@ -71,7 +71,7 @@ def main():
 
     # 1. 默认 R=4，固定种子复现
     cfg = RegionConfig.default()
-    mgr = RegionManager(cfg)
+    mgr = Region(cfg)
     region_map = mgr.generate()
     ok, sizes = mgr.validate()
     print(f"[默认] validate={ok}, 各区域面积={sizes.tolist()}, 下限={cfg.min_cells_per_region}")
@@ -93,7 +93,7 @@ def main():
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.6, rows * 4.6))
     for ax, r in zip(axes.flatten(), r_list):
         c = replace(RegionConfig.default(), region_count=r, min_area_ratio=0.05)
-        m = RegionManager(c)
+        m = Region(c)
         rm = m.generate()
         ok, sz = m.validate()
         draw_region_map(
@@ -116,7 +116,7 @@ def main():
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.6, rows * 4.6))
     for ax, imb in zip(axes.flatten(), imb_list):
         c = replace(RegionConfig.default(), area_imbalance=imb)
-        m = RegionManager(c)
+        m = Region(c)
         rm = m.generate()
         ok, sz = m.validate()
         draw_region_map(rm, c, ax, f"imbalance={imb}, sizes={sz.tolist()}")
