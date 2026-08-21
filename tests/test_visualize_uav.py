@@ -18,8 +18,8 @@ from scripts.visualize_uav import draw_uav_distribution
 
 
 class TestUAVDistributionDrawing(unittest.TestCase):
-    def test_draw_uav_distribution_plots_users_masters_and_members(self):
-        """同一张图应包含全部用户、Master 与 Member。"""
+    def test_draw_uav_distribution_plots_users_masters_members_and_bs(self):
+        """同一张图应分别包含全部用户、Master、Member 与 BS。"""
         region = Region()
         region.generate()
         users = User()
@@ -33,7 +33,8 @@ class TestUAVDistributionDrawing(unittest.TestCase):
             artists = draw_uav_distribution(region, users, masters, members, ax)
             self.assertEqual(len(artists["users"].get_offsets()), users.num_users)
             self.assertEqual(len(artists["masters"].get_offsets()), masters.num_uavs)
-            self.assertEqual(len(artists["members"].get_offsets()), members.num_uavs)
+            self.assertEqual(len(artists["members"].get_offsets()), members.member_uav_count)
+            self.assertEqual(len(artists["bs"].get_offsets()), 1)
         finally:
             plt.close(fig)
 

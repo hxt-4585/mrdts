@@ -17,3 +17,15 @@ slot_energy = 145.0
 flight_duration = 0.5
 # Member UAV 的最大水平飞行速度（m/s）。
 max_horizontal_speed = 10.0
+# 每架 Member UAV 的计算核心数。
+core_count = 2
+# 每个 Member 计算核心的频率（CPU cycles/s）。
+core_frequency = 10000000000.0
+
+[bs]
+# 全局固定 BS 的天线高度（m）。水平坐标由环境几何中心确定。
+altitude = 25.0
+# BS 的计算核心数。
+core_count = 4
+# 每个 BS 计算核心的频率（CPU cycles/s）。
+core_frequency = 12000000000.0

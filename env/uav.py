@@ -59,8 +59,8 @@ class UAV:
         region_ids = np.asarray(region_ids, dtype=np.int32)
         if region_ids.ndim != 1:
             raise ValueError("region_ids 的 shape 必须为 (N,)")
-        if (region_ids < 1).any():
-            raise ValueError("region_ids 必须为从 1 开始的正整数")
+        if (region_ids < 0).any():
+            raise ValueError("region_ids 必须为非负整数")
         return region_ids
 
     def _validate_indices(self, indices):
@@ -108,7 +108,32 @@ class MemberUAV(UAV):
     def __init__(self, config=None):
         self.config = config if config is not None else UAVConfig.default()
         self.region_member_counts = None
+        self.core_counts = None
+        self.core_frequencies = None
         super().__init__()
+
+    @property
+    def member_uav_count(self):
+        """返回可移动 Member UAV 的数量，不包含最后一行的 BS。"""
+        return self.config.member_uav_count
+
+    @property
+    def bs_index(self):
+        """返回统一计算节点矩阵中固定 BS 的最后一行索引。"""
+        return self.member_uav_count
+
+    def _initialize_compute_resources(self):
+        """初始化 Member 与最后一行 BS 的计算核心矩阵。"""
+        self.core_counts = np.full(self.num_uavs, self.config.member_core_count, dtype=np.int32)
+        self.core_counts[self.bs_index] = self.config.bs_core_count
+        max_core_count = int(self.core_counts.max())
+        self.core_frequencies = np.zeros((self.num_uavs, max_core_count), dtype=float)
+        self.core_frequencies[: self.bs_index, : self.config.member_core_count] = (
+            self.config.member_core_frequency
+        )
+        self.core_frequencies[self.bs_index, : self.config.bs_core_count] = (
+            self.config.bs_core_frequency
+        )
 
     def _allocate_region_member_counts(self, region_user_counts):
         """按区域用户数分配 Member，并保证区域最低配额。"""
@@ -148,7 +173,7 @@ class MemberUAV(UAV):
         if self.positions is None:
             raise RuntimeError("Member UAV 尚未生成")
         normalized_actions = np.asarray(normalized_actions, dtype=np.float32)
-        if normalized_actions.shape != (self.num_uavs, 2):
+        if normalized_actions.shape != (self.member_uav_count, 2):
             raise ValueError("normalized_actions 的 shape 必须为 (M, 2)")
         if not np.isfinite(normalized_actions).all():
             raise ValueError("normalized_actions 必须全部为有限数值")
@@ -160,7 +185,7 @@ class MemberUAV(UAV):
             raise ValueError("max_horizontal_speed 必须为非负数")
 
         velocities = normalized_actions * self.config.max_horizontal_speed
-        self.positions[:, :2] += velocities * self.config.flight_duration
+        self.positions[: self.bs_index, :2] += velocities * self.config.flight_duration
         return self.positions
 
     @staticmethod
@@ -183,8 +208,8 @@ class MemberUAV(UAV):
         region_count = region.config.region_count
         user_counts = np.bincount(users.region_ids, minlength=region_count + 1)[1:]
         member_counts = self._allocate_region_member_counts(user_counts)
-        positions = np.empty((self.config.member_uav_count, 3), dtype=np.float32)
-        region_ids = np.empty(self.config.member_uav_count, dtype=np.int32)
+        positions = np.empty((self.member_uav_count + 1, 3), dtype=np.float32)
+        region_ids = np.empty(self.member_uav_count + 1, dtype=np.int32)
 
         start = 0
         for region_index, count in enumerate(member_counts):
@@ -202,6 +227,13 @@ class MemberUAV(UAV):
             region_ids[start:end] = region_index + 1
             start = end
 
+        positions[self.bs_index] = (
+            region.config.side_length / 2,
+            region.config.side_length / 2,
+            self.config.bs_altitude,
+        )
+        region_ids[self.bs_index] = 0
         self.region_member_counts = member_counts
         super().__init__(positions, region_ids)
+        self._initialize_compute_resources()
         return self.positions

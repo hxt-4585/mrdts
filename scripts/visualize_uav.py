@@ -58,8 +58,8 @@ def draw_uav_distribution(region, users, masters, members, ax):
         label="Ground users",
     )
     members_artist = ax.scatter(
-        members.positions[:, 0],
-        members.positions[:, 1],
+        members.positions[: members.bs_index, 0],
+        members.positions[: members.bs_index, 1],
         marker="^",
         s=95,
         c="#1565c0",
@@ -67,6 +67,17 @@ def draw_uav_distribution(region, users, masters, members, ax):
         linewidths=0.8,
         label="Member UAV",
         zorder=3,
+    )
+    bs_artist = ax.scatter(
+        members.positions[members.bs_index : members.bs_index + 1, 0],
+        members.positions[members.bs_index : members.bs_index + 1, 1],
+        marker="s",
+        s=125,
+        c="#2e7d32",
+        edgecolors="white",
+        linewidths=0.9,
+        label="BS",
+        zorder=4,
     )
     masters_artist = ax.scatter(
         masters.positions[:, 0],
@@ -77,7 +88,7 @@ def draw_uav_distribution(region, users, masters, members, ax):
         edgecolors="white",
         linewidths=0.9,
         label="Master UAV",
-        zorder=4,
+        zorder=5,
     )
 
     for region_id, member_count in enumerate(members.region_member_counts, start=1):
@@ -93,19 +104,25 @@ def draw_uav_distribution(region, users, masters, members, ax):
             fontsize=8,
             fontweight="bold",
             bbox={"boxstyle": "round,pad=0.2", "fc": "white", "alpha": 0.72},
-            zorder=5,
+            zorder=6,
         )
 
     ax.set_title(
-        "Initial distribution: ground users and UAVs "
-        f"(Master/Member altitude = {masters.config.master_altitude:g} m)"
+        "Initial distribution: ground users, UAVs and BS "
+        f"(Master/Member = {masters.config.master_altitude:g} m, "
+        f"BS = {members.config.bs_altitude:g} m)"
     )
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
     ax.set_xlim(0, side_length)
     ax.set_ylim(0, side_length)
     ax.legend(loc="upper right")
-    return {"users": users_artist, "masters": masters_artist, "members": members_artist}
+    return {
+        "users": users_artist,
+        "masters": masters_artist,
+        "members": members_artist,
+        "bs": bs_artist,
+    }
 
 
 def main():

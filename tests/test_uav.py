@@ -100,13 +100,49 @@ class TestMemberUAV(unittest.TestCase):
 
         members.generate_from_region_and_user(region, users, masters)
 
-        self.assertEqual(members.num_uavs, members.config.member_uav_count)
-        self.assertEqual(members.region_member_counts.sum(), members.num_uavs)
-        self.assertTrue((members.positions[:, 2] == members.config.member_altitude).all())
-        for position, region_id in zip(members.positions, members.region_ids):
+        self.assertEqual(members.num_uavs, members.config.member_uav_count + 1)
+        self.assertEqual(members.region_member_counts.sum(), members.member_uav_count)
+        self.assertTrue(
+            (members.positions[: members.bs_index, 2] == members.config.member_altitude).all()
+        )
+        for position, region_id in zip(
+            members.positions[: members.bs_index], members.region_ids[: members.bs_index]
+        ):
             self.assertEqual(region.get_region_id(position[0], position[1]), region_id)
             user_positions = users.positions[users.region_ids == region_id, :2]
             self.assertTrue(np.any(np.all(user_positions == position[:2], axis=1)))
+
+    def test_appends_bs_at_center_with_zero_region_id_and_configured_cores(self):
+        """最后一行应为固定在区域中心的 BS，并拥有独立的计算资源。"""
+        region = Region()
+        region.generate()
+        users = User()
+        users.generate_from_region(region)
+        masters = MasterUAV()
+        masters.generate_from_region(region)
+        members = MemberUAV()
+
+        members.generate_from_region_and_user(region, users, masters)
+
+        self.assertEqual(members.bs_index, members.config.member_uav_count)
+        self.assertEqual(members.member_uav_count, members.config.member_uav_count)
+        self.assertEqual(members.num_uavs, members.config.member_uav_count + 1)
+        np.testing.assert_allclose(
+            members.positions[members.bs_index],
+            np.array([500.0, 500.0, 25.0], dtype=np.float32),
+        )
+        self.assertEqual(members.region_ids[members.bs_index], 0)
+        np.testing.assert_array_equal(
+            members.core_counts,
+            np.array([2] * members.config.member_uav_count + [4], dtype=np.int32),
+        )
+        np.testing.assert_array_equal(
+            members.core_frequencies[: members.bs_index, :2],
+            np.full((members.member_uav_count, 2), 10e9),
+        )
+        np.testing.assert_array_equal(
+            members.core_frequencies[members.bs_index], np.full(4, 12e9)
+        )
 
     def test_selects_the_closest_users_to_each_master_for_initial_positions(self):
         """每个区域的初始 Member 应选取离本区域 Master 最近的用户位置。"""
@@ -140,7 +176,7 @@ class TestMemberUAV(unittest.TestCase):
         members.generate_from_region_and_user(region, users, masters)
         original_positions = members.positions.copy()
         normalized_actions = np.tile(
-            np.array([0.4, -0.2], dtype=np.float32), (members.num_uavs, 1)
+            np.array([0.4, -0.2], dtype=np.float32), (members.member_uav_count, 1)
         )
 
         positions = members.apply_flight_actions(normalized_actions)
@@ -149,6 +185,25 @@ class TestMemberUAV(unittest.TestCase):
         self.assertEqual(members.config.flight_duration, 0.5)
         self.assertEqual(members.config.max_horizontal_speed, 10.0)
         np.testing.assert_allclose(
-            positions[:, :2], original_positions[:, :2] + np.array([2.0, -1.0])
+            positions[: members.bs_index, :2],
+            original_positions[: members.bs_index, :2] + np.array([2.0, -1.0]),
         )
         np.testing.assert_array_equal(positions[:, 2], original_positions[:, 2])
+
+    def test_flight_actions_leave_bs_position_unchanged(self):
+        """Member 飞行仅改变 Member 行，不得移动最后一行的 BS。"""
+        region = Region()
+        region.generate()
+        users = User()
+        users.generate_from_region(region)
+        masters = MasterUAV()
+        masters.generate_from_region(region)
+        members = MemberUAV()
+        members.generate_from_region_and_user(region, users, masters)
+        original_bs_position = members.positions[members.bs_index].copy()
+
+        members.apply_flight_actions(
+            np.zeros((members.member_uav_count, 2), dtype=np.float32)
+        )
+
+        np.testing.assert_array_equal(members.positions[members.bs_index], original_bs_position)

@@ -17,6 +17,11 @@ class UAVConfig:
     member_slot_energy: float
     flight_duration: float
     max_horizontal_speed: float
+    member_core_count: int
+    member_core_frequency: float
+    bs_altitude: float
+    bs_core_count: int
+    bs_core_frequency: float
 
     @classmethod
     def default(cls) -> "UAVConfig":
@@ -30,6 +35,7 @@ class UAVConfig:
             data = tomllib.load(file)
         master = data["master"]
         member = data["member"]
+        bs = data["bs"]
         return cls(
             master_uav_count=master["uav_count"],
             master_altitude=master["altitude"],
@@ -39,4 +45,9 @@ class UAVConfig:
             member_slot_energy=member["slot_energy"],
             flight_duration=member["flight_duration"],
             max_horizontal_speed=member["max_horizontal_speed"],
+            member_core_count=member["core_count"],
+            member_core_frequency=member["core_frequency"],
+            bs_altitude=bs["altitude"],
+            bs_core_count=bs["core_count"],
+            bs_core_frequency=bs["core_frequency"],
         )
