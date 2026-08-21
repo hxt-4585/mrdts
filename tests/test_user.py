@@ -57,6 +57,37 @@ class TestUser(unittest.TestCase):
         np.testing.assert_array_equal(first.region_ids, second.region_ids)
         np.testing.assert_array_equal(first.region_user_counts, second.region_user_counts)
 
+    def test_center_bias_reduces_mean_distance_to_region_centers(self):
+        """中心偏置应使用户整体更靠近所属区域的质心。"""
+        uniform_config = replace(
+            self.config,
+            total_users=4000,
+            center_bias=0.0,
+            center_spread_ratio=0.7,
+        )
+        centered_config = replace(uniform_config, center_bias=0.6)
+        uniform_users = User(uniform_config)
+        centered_users = User(centered_config)
+        uniform_users.generate_from_region(self.region)
+        centered_users.generate_from_region(self.region)
+
+        def mean_distance_to_region_centers(users):
+            distances = []
+            cell_size = self.region.config.cell_size
+            for region_id in range(1, self.region.config.region_count + 1):
+                rows, columns = np.where(self.region.region_map == region_id)
+                center = np.array(
+                    [(columns.mean() + 0.5) * cell_size, (rows.mean() + 0.5) * cell_size]
+                )
+                positions = users.positions[users.region_ids == region_id, :2]
+                distances.append(np.linalg.norm(positions - center, axis=1))
+            return np.concatenate(distances).mean()
+
+        self.assertLess(
+            mean_distance_to_region_centers(centered_users),
+            mean_distance_to_region_centers(uniform_users),
+        )
+
     def test_generate_from_region_requires_region_map(self):
         """用户生成必须基于已生成或加载的区域地图。"""
         with self.assertRaises(RuntimeError):

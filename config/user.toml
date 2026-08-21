@@ -5,5 +5,9 @@ total_users = 100
 min_users_per_region = 1
 # 按区域面积分配用户时施加的相对浮动上限，例如 0.1 表示 ±10%。
 area_fluctuation = 0.1
+# 区域内用户向质心聚集的强度；0 表示均匀分布，1 表示纯中心分布。
+center_bias = 0.85
+# 中心分布的扩散范围，相对于区域等效半径；值越大，分布越平缓。
+center_spread_ratio = 0.25
 # 用户位置与区域用户数分配使用的独立随机种子。
 seed = 60

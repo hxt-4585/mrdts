@@ -12,6 +12,8 @@ class UserConfig:
     total_users: int
     min_users_per_region: int
     area_fluctuation: float
+    center_bias: float
+    center_spread_ratio: float
     seed: int | None
 
     @classmethod
@@ -29,5 +31,7 @@ class UserConfig:
             total_users=population["total_users"],
             min_users_per_region=population["min_users_per_region"],
             area_fluctuation=population["area_fluctuation"],
+            center_bias=population["center_bias"],
+            center_spread_ratio=population["center_spread_ratio"],
             seed=population.get("seed"),
         )

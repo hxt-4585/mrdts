@@ -31,6 +31,10 @@ class User:
             raise ValueError("min_users_per_region 必须是非负整数")
         if not 0.0 <= cfg.area_fluctuation <= 1.0:
             raise ValueError("area_fluctuation 应在 [0, 1] 区间内")
+        if not 0.0 <= cfg.center_bias <= 1.0:
+            raise ValueError("center_bias 应在 [0, 1] 区间内")
+        if cfg.center_spread_ratio <= 0.0:
+            raise ValueError("center_spread_ratio 必须大于 0")
         if cfg.total_users < region_count * cfg.min_users_per_region:
             raise ValueError("total_users 不足以满足每个区域的最小用户数")
 
@@ -51,6 +55,24 @@ class User:
             counts[index] += 1
         return counts
 
+    def _sample_region_cells(self, cells, count, rng):
+        """按均匀底噪和中心高斯权重混合采样区域内网格。"""
+        if self.config.center_bias == 0.0:
+            return cells[rng.integers(len(cells), size=count)]
+
+        center = cells.mean(axis=0)
+        squared_distances = ((cells - center) ** 2).sum(axis=1)
+        equivalent_radius = np.sqrt(len(cells) / np.pi)
+        sigma = self.config.center_spread_ratio * equivalent_radius
+        center_probabilities = np.exp(-squared_distances / (2.0 * sigma ** 2))
+        center_probabilities /= center_probabilities.sum()
+        uniform_probability = 1.0 / len(cells)
+        probabilities = (
+            (1.0 - self.config.center_bias) * uniform_probability
+            + self.config.center_bias * center_probabilities
+        )
+        return cells[rng.choice(len(cells), size=count, p=probabilities)]
+
     def generate_from_region(self, region):
         """根据已生成的区域地图创建用户坐标、区域编号与区域用户数。"""
         if region.region_map is None:
@@ -69,7 +91,7 @@ class User:
         for region_index, count in enumerate(counts):
             end = start + int(count)
             cells = np.argwhere(region_map == region_index + 1)
-            selected = cells[rng.integers(len(cells), size=count)]
+            selected = self._sample_region_cells(cells, count, rng)
             offsets = rng.random((count, 2))
             positions[start:end, 0] = (selected[:, 1] + offsets[:, 0]) * cell_size
             positions[start:end, 1] = (selected[:, 0] + offsets[:, 1]) * cell_size

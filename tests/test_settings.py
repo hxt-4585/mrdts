@@ -36,6 +36,8 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.total_users, 100)
         self.assertEqual(config.min_users_per_region, 1)
         self.assertEqual(config.area_fluctuation, 0.1)
+        self.assertEqual(config.center_bias, 0.85)
+        self.assertEqual(config.center_spread_ratio, 0.25)
         self.assertEqual(config.seed, 60)
 
     def test_dag_and_region_use_distinct_seeds(self):
