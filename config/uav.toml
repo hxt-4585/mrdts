@@ -1,0 +1,13 @@
+[master]
+# Master UAV 总数；必须与区域数量一致，保证每个区域恰有一架 Master。
+uav_count = 4
+# Master UAV 的固定飞行高度（m）。
+altitude = 50.0
+
+[member]
+# 全部 Member UAV 的总数；初始时按各区域地面用户数分配。
+uav_count = 12
+# 每个区域初始至少部署的 Member UAV 数量。
+min_uavs_per_region = 1
+# Member UAV 的初始飞行高度（m）。
+altitude = 50.0
