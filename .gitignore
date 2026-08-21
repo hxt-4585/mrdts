@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 venv/
 .uv-cache/
+handoff.md
 
 # 生成产物
 figs/
