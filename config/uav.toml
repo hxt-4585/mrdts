@@ -11,3 +11,9 @@ uav_count = 12
 min_uavs_per_region = 1
 # Member UAV 的初始飞行高度（m）。
 altitude = 50.0
+# 每架 Member UAV 在单个时隙内分配的能量（J）。
+slot_energy = 145.0
+# 时隙中飞行阶段的持续时间（s）。
+flight_duration = 0.5
+# Member UAV 的最大水平飞行速度（m/s）。
+max_horizontal_speed = 10.0

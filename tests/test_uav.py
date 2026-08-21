@@ -127,3 +127,28 @@ class TestMemberUAV(unittest.TestCase):
             actual_positions = members.positions[members.region_ids == region_id, :2]
             actual = np.sort(((actual_positions - master_position) ** 2).sum(axis=1))
             np.testing.assert_allclose(actual, expected)
+
+    def test_applies_horizontal_velocity_for_configured_flight_duration(self):
+        """Member 应将归一化动作缩放为最大速度后更新水平位置。"""
+        region = Region()
+        region.generate()
+        users = User()
+        users.generate_from_region(region)
+        masters = MasterUAV()
+        masters.generate_from_region(region)
+        members = MemberUAV()
+        members.generate_from_region_and_user(region, users, masters)
+        original_positions = members.positions.copy()
+        normalized_actions = np.tile(
+            np.array([0.4, -0.2], dtype=np.float32), (members.num_uavs, 1)
+        )
+
+        positions = members.apply_flight_actions(normalized_actions)
+
+        self.assertEqual(members.config.member_slot_energy, 145.0)
+        self.assertEqual(members.config.flight_duration, 0.5)
+        self.assertEqual(members.config.max_horizontal_speed, 10.0)
+        np.testing.assert_allclose(
+            positions[:, :2], original_positions[:, :2] + np.array([2.0, -1.0])
+        )
+        np.testing.assert_array_equal(positions[:, 2], original_positions[:, 2])

@@ -136,6 +136,33 @@ class MemberUAV(UAV):
             counts[index] += 1
         return counts
 
+    def apply_flight_actions(self, normalized_actions):
+        """将归一化水平动作缩放为速度后应用到每架 Member。
+
+        Args:
+            normalized_actions: shape=(M, 2) 的归一化动作矩阵，元素位于 [-1, 1]。
+
+        Returns:
+            更新后的 shape=(M, 3) 位置矩阵。高度不在飞行阶段改变。
+        """
+        if self.positions is None:
+            raise RuntimeError("Member UAV 尚未生成")
+        normalized_actions = np.asarray(normalized_actions, dtype=np.float32)
+        if normalized_actions.shape != (self.num_uavs, 2):
+            raise ValueError("normalized_actions 的 shape 必须为 (M, 2)")
+        if not np.isfinite(normalized_actions).all():
+            raise ValueError("normalized_actions 必须全部为有限数值")
+        if ((normalized_actions < -1.0) | (normalized_actions > 1.0)).any():
+            raise ValueError("normalized_actions 的元素必须位于 [-1, 1]")
+        if self.config.flight_duration < 0.0:
+            raise ValueError("flight_duration 必须为非负数")
+        if self.config.max_horizontal_speed < 0.0:
+            raise ValueError("max_horizontal_speed 必须为非负数")
+
+        velocities = normalized_actions * self.config.max_horizontal_speed
+        self.positions[:, :2] += velocities * self.config.flight_duration
+        return self.positions
+
     @staticmethod
     def _select_user_positions_near_master(user_positions, master_position, count):
         """选择距离本区域 Master 最近的用户位置作为初始 Member 位置。"""
