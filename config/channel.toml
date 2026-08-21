@@ -1,0 +1,20 @@
+[bandwidth]
+# 用户到 Member UAV 的可用带宽（MHz）。
+ground_to_air_mhz = 4.0
+# Member UAV 间的可用带宽（MHz）。
+air_to_air_mhz = 6.0
+# Member UAV 到固定 BS 的可用带宽（MHz）。
+air_to_ground_mhz = 4.0
+
+[propagation]
+# 1 m 处的参考信道增益；当前简化模型使用 gain = g0 / d^2。
+reference_channel_gain = 1e-6
+# NLoS 相对 LoS 的增益衰减系数，必须位于 (0, 1]。
+nlos_attenuation_factor = 0.2
+# 接收机噪声功率（W）。
+noise_power_w = 1e-13
+
+[propagation.los_probability]
+# 仰角 LoS 概率模型：1 / (1 + alpha * exp(-beta * (theta - alpha)))。
+alpha = 9.61
+beta = 0.16

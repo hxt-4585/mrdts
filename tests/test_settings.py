@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-from env.settings import DAGConfig, RegionConfig, UAVConfig, UserConfig
+from env.settings import ChannelConfig, DAGConfig, RegionConfig, UAVConfig, UserConfig
 from env.dag_generator import DAGGenerator
 
 
@@ -40,6 +40,19 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.center_bias, 0.85)
         self.assertEqual(config.center_spread_ratio, 0.25)
         self.assertEqual(config.seed, 60)
+
+    def test_channel_config_loads_link_and_propagation_parameters(self):
+        """通信模型配置应保留三类带宽与 LoS/NLoS 参数。"""
+        config = ChannelConfig.from_toml(PROJECT_ROOT / "config" / "channel.toml")
+
+        self.assertEqual(config.ground_to_air_bandwidth_mhz, 4.0)
+        self.assertEqual(config.air_to_air_bandwidth_mhz, 6.0)
+        self.assertEqual(config.air_to_ground_bandwidth_mhz, 4.0)
+        self.assertEqual(config.reference_channel_gain, 1e-6)
+        self.assertEqual(config.nlos_attenuation_factor, 0.2)
+        self.assertEqual(config.noise_power_w, 1e-13)
+        self.assertEqual(config.los_alpha, 9.61)
+        self.assertEqual(config.los_beta, 0.16)
 
     def test_uav_config_loads_member_energy_and_communication_parameters(self):
         """推进、计算与通信参数应只作为 Member UAV 的类型化配置加载。"""
