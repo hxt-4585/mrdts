@@ -39,6 +39,7 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.area_fluctuation, 0.1)
         self.assertEqual(config.center_bias, 0.85)
         self.assertEqual(config.center_spread_ratio, 0.25)
+        self.assertEqual(config.transmit_power, 0.1)
         self.assertEqual(config.seed, 60)
 
     def test_channel_config_loads_link_and_propagation_parameters(self):

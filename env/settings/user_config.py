@@ -15,6 +15,7 @@ class UserConfig:
     center_bias: float
     center_spread_ratio: float
     seed: int | None
+    transmit_power: float
 
     @classmethod
     def default(cls) -> "UserConfig":
@@ -34,4 +35,5 @@ class UserConfig:
             center_bias=population["center_bias"],
             center_spread_ratio=population["center_spread_ratio"],
             seed=population.get("seed"),
+            transmit_power=population["transmit_power"],
         )

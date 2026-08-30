@@ -110,6 +110,7 @@ class MemberUAV(UAV):
         self.region_member_counts = None
         self.core_counts = None
         self.core_frequencies = None
+        self.core_available_at = None
         super().__init__()
 
     @property
@@ -134,6 +135,31 @@ class MemberUAV(UAV):
         self.core_frequencies[self.bs_index, : self.config.bs_core_count] = (
             self.config.bs_core_frequency
         )
+        self.core_available_at = np.zeros((self.num_uavs, max_core_count), dtype=float)
+
+    def schedule_computation(self, server_id, cpu_cycles, data_ready_time):
+        """在指定 Member 或 BS 的最早可用核心上调度一个子任务。
+
+        Args:
+            server_id: 计算节点索引；Member 为 ``[0, bs_index)``，BS 为 ``bs_index``。
+            cpu_cycles: 子任务所需 CPU cycles。
+            data_ready_time: 该子任务输入数据已到达计算节点的时刻（s）。
+
+        Returns:
+            该子任务的完成时刻（s）。
+        """
+        if self.core_available_at is None:
+            raise RuntimeError("Member UAV 尚未生成")
+        if not 0 <= server_id < self.num_uavs:
+            raise IndexError("server_id 超出计算节点范围")
+
+        core_count = self.core_counts[server_id]
+        core_available_at = self.core_available_at[server_id, :core_count]
+        core_id = int(np.argmin(core_available_at))
+        start_time = max(data_ready_time, core_available_at[core_id])
+        finish_time = start_time + cpu_cycles / self.core_frequencies[server_id, core_id]
+        self.core_available_at[server_id, core_id] = finish_time
+        return finish_time
 
     def _allocate_region_member_counts(self, region_user_counts):
         """按区域用户数分配 Member，并保证区域最低配额。"""

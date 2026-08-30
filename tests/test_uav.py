@@ -1,6 +1,7 @@
 """UAV 集合基础状态测试。"""
 
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
@@ -88,6 +89,18 @@ class TestMasterUAV(unittest.TestCase):
 
 
 class TestMemberUAV(unittest.TestCase):
+    @staticmethod
+    def _generate_members(config=None):
+        region = Region()
+        region.generate()
+        users = User()
+        users.generate_from_region(region)
+        masters = MasterUAV()
+        masters.generate_from_region(region)
+        members = MemberUAV(config=config)
+        members.generate_from_region_and_user(region, users, masters)
+        return members
+
     def test_generates_configured_members_at_user_positions_in_their_regions(self):
         """Member 应按用户分布初始化，并保持正确的区域归属和高度。"""
         region = Region()
@@ -207,3 +220,27 @@ class TestMemberUAV(unittest.TestCase):
         )
 
         np.testing.assert_array_equal(members.positions[members.bs_index], original_bs_position)
+
+    def test_schedules_computation_after_the_only_core_becomes_available(self):
+        """单核 Member 上的后续子任务必须等待前一个子任务完成。"""
+        config = replace(MemberUAV().config, member_core_count=1)
+        members = self._generate_members(config)
+
+        first_finish = members.schedule_computation(0, cpu_cycles=20e9, data_ready_time=0.0)
+        second_finish = members.schedule_computation(0, cpu_cycles=10e9, data_ready_time=0.5)
+
+        self.assertEqual(first_finish, 2.0)
+        self.assertEqual(second_finish, 3.0)
+        self.assertEqual(members.core_available_at[0, 0], 3.0)
+
+    def test_schedules_computation_on_earliest_available_core(self):
+        """多核 Member 应选择最早可用的核心，而不是固定使用某一核心。"""
+        members = self._generate_members()
+
+        members.schedule_computation(0, cpu_cycles=20e9, data_ready_time=0.0)
+        second_finish = members.schedule_computation(0, cpu_cycles=10e9, data_ready_time=0.0)
+        third_finish = members.schedule_computation(0, cpu_cycles=10e9, data_ready_time=0.0)
+
+        self.assertEqual(second_finish, 1.0)
+        self.assertEqual(third_finish, 2.0)
+        np.testing.assert_array_equal(members.core_available_at[0, :2], [2.0, 2.0])
