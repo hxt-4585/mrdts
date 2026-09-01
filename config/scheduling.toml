@@ -1,0 +1,4 @@
+[scheduling]
+# 单个时隙内 DAG 传输与执行的最长允许调度时长（s）。
+# 后续调度器应保证本时隙提交的 DAG 在 slot_start + max_duration_s 前完成。
+max_duration_s = 1.0

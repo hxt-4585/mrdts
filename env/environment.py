@@ -22,6 +22,7 @@ class Environment:
         self.members = members
         self.channel_model = channel_model
         self.user_transmit_power = user_transmit_power
+        self.user_member_ids = None
 
     @property
     def member_transmit_power(self) -> float:
@@ -75,3 +76,110 @@ class Environment:
         return self.channel_model.transmission_delay_s(
             data_size_bits, transmitter, receiver, transmit_power_w, link_type
         )
+
+    def create_scheduling_runtime(self, user_positions, user_member_ids):
+        """按当前实体快照创建可跨时隙保存状态的调度运行时。"""
+        from env.channel_queue import EntityKind, EntityRef
+        from env.event_runtime import SchedulingRuntime, ServerSpec
+
+        user_positions = np.asarray(user_positions, dtype=float)
+        user_member_ids = np.asarray(user_member_ids, dtype=int)
+        if user_positions.ndim != 2 or user_positions.shape[1] != 3:
+            raise ValueError("user_positions 的 shape 必须为 (N, 3)")
+        if user_member_ids.shape != (len(user_positions),):
+            raise ValueError("user_member_ids 的 shape 必须为 (N,)")
+        positions = {}
+        powers = {}
+        servers = {}
+        for member_id in range(self.bs_index):
+            entity = EntityRef(EntityKind.MEMBER_UAV, member_id)
+            positions[entity] = self.members.positions[member_id]
+            powers[entity] = self.member_transmit_power
+            servers[entity] = ServerSpec(
+                tuple(self.core_frequencies(member_id)), self.members.config.member_capacitance_factor
+            )
+        bs = EntityRef(EntityKind.BS, 0)
+        positions[bs] = self.members.positions[self.bs_index]
+        powers[bs] = self.member_transmit_power
+        servers[bs] = ServerSpec(
+            tuple(self.core_frequencies(self.bs_index)), self.members.config.member_capacitance_factor
+        )
+        for user_id, position in enumerate(user_positions):
+            if not 0 <= user_member_ids[user_id] < self.bs_index:
+                raise ValueError("每个用户必须关联一个有效 Member UAV")
+            ground = EntityRef(EntityKind.GROUND_DEVICE, user_id)
+            positions[ground] = position
+            powers[ground] = self.user_transmit_power
+        member_regions = {
+            EntityRef(EntityKind.MEMBER_UAV, member_id): int(self.members.region_ids[member_id])
+            for member_id in range(self.bs_index)
+        }
+        ground_owner_members = {
+            EntityRef(EntityKind.GROUND_DEVICE, user_id): EntityRef(
+                EntityKind.MEMBER_UAV, int(member_id)
+            )
+            for user_id, member_id in enumerate(user_member_ids)
+        }
+        self.user_member_ids = user_member_ids.copy()
+        return SchedulingRuntime(
+            self.channel_model,
+            positions,
+            servers,
+            powers,
+            member_regions=member_regions,
+            ground_owner_members=ground_owner_members,
+        )
+
+    def refresh_slot_topology(self, region, user_positions, runtime):
+        """在 Member 飞行结束后刷新区域、用户关联和运行时位置快照。
+
+        用户固定在地面；每位用户关联到其当前区域内距离最近的 Member UAV。
+        该方法只改变后续调度所见的拓扑，不重建运行中的信道、计算或 DAG 状态。
+        """
+        from env.channel_queue import EntityKind, EntityRef
+
+        user_positions = np.asarray(user_positions, dtype=float)
+        if user_positions.ndim != 2 or user_positions.shape[1] != 3:
+            raise ValueError("user_positions 的 shape 必须为 (N, 3)")
+        if not np.isfinite(user_positions).all():
+            raise ValueError("user_positions 必须全部为有限数值")
+
+        member_ids = np.arange(self.bs_index, dtype=np.int32)
+        member_region_ids = np.array(
+            [region.get_region_id(*position[:2]) for position in self.members.positions[: self.bs_index]],
+            dtype=np.int32,
+        )
+        self.members.update_region_ids(member_ids, member_region_ids)
+        user_region_ids = np.array(
+            [region.get_region_id(*position[:2]) for position in user_positions], dtype=np.int32
+        )
+        associations = np.empty(len(user_positions), dtype=np.int32)
+        for user_id, (position, region_id) in enumerate(zip(user_positions, user_region_ids)):
+            candidates = member_ids[member_region_ids == region_id]
+            if len(candidates) == 0:
+                raise RuntimeError(f"区域 {region_id} 当前没有可关联的 Member UAV")
+            horizontal_distances = np.linalg.norm(
+                self.members.positions[candidates, :2] - position[:2], axis=1
+            )
+            associations[user_id] = candidates[int(np.argmin(horizontal_distances))]
+
+        entity_positions = {
+            EntityRef(EntityKind.MEMBER_UAV, int(member_id)): self.members.positions[member_id]
+            for member_id in member_ids
+        }
+        entity_positions[EntityRef(EntityKind.BS, 0)] = self.members.positions[self.bs_index]
+        runtime.update_entity_positions(entity_positions)
+        runtime.update_topology(
+            member_regions={
+                EntityRef(EntityKind.MEMBER_UAV, int(member_id)): int(member_region_ids[member_id])
+                for member_id in member_ids
+            },
+            ground_owner_members={
+                EntityRef(EntityKind.GROUND_DEVICE, user_id): EntityRef(
+                    EntityKind.MEMBER_UAV, int(member_id)
+                )
+                for user_id, member_id in enumerate(associations)
+            },
+        )
+        self.user_member_ids = associations
+        return associations.copy()

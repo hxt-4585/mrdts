@@ -36,7 +36,9 @@ class ChannelModel:
     def __init__(self, config: ChannelConfig | None = None):
         self.config = config if config is not None else ChannelConfig.default()
 
-    def calculate_link(self, transmitter, receiver, transmit_power_w, link_type) -> LinkMetrics:
+    def calculate_link(
+        self, transmitter, receiver, transmit_power_w, link_type, bandwidth_hz=None
+    ) -> LinkMetrics:
         """计算指定类型链路的 LoS/NLoS 平均增益与香农速率。"""
         tx_position = self._validate_position(transmitter, "transmitter")
         rx_position = self._validate_position(receiver, "receiver")
@@ -57,7 +59,11 @@ class ChannelModel:
         los_gain = self.config.reference_channel_gain / distance_m**2
         nlos_gain = self.config.nlos_attenuation_factor * los_gain
         average_channel_gain = los_probability * los_gain + (1.0 - los_probability) * nlos_gain
-        bandwidth_hz = self._bandwidth_hz(link_type)
+        bandwidth_hz = (
+            self._bandwidth_hz(link_type)
+            if bandwidth_hz is None
+            else self._validate_positive(bandwidth_hz, "bandwidth_hz")
+        )
         snr = transmit_power_w * average_channel_gain / self.config.noise_power_w
         rate_bps = bandwidth_hz * math.log2(1.0 + snr)
 
@@ -71,17 +77,23 @@ class ChannelModel:
             rate_bps=rate_bps,
         )
 
-    def transmission_delay_s(self, data_size_bits, transmitter, receiver, transmit_power_w, link_type):
+    def transmission_delay_s(
+        self, data_size_bits, transmitter, receiver, transmit_power_w, link_type, bandwidth_hz=None
+    ):
         """返回将 data_size_bits 通过链路发送所需的时间（s）。"""
         data_size_bits = self._validate_nonnegative(data_size_bits, "data_size_bits")
-        metrics = self.calculate_link(transmitter, receiver, transmit_power_w, link_type)
+        metrics = self.calculate_link(
+            transmitter, receiver, transmit_power_w, link_type, bandwidth_hz
+        )
         return data_size_bits / metrics.rate_bps
 
-    def transmission_energy_j(self, data_size_bits, transmitter, receiver, transmit_power_w, link_type):
+    def transmission_energy_j(
+        self, data_size_bits, transmitter, receiver, transmit_power_w, link_type, bandwidth_hz=None
+    ):
         """返回发送端传输 data_size_bits 所消耗的能量（J）。"""
         transmit_power_w = self._validate_positive(transmit_power_w, "transmit_power_w")
         return transmit_power_w * self.transmission_delay_s(
-            data_size_bits, transmitter, receiver, transmit_power_w, link_type
+            data_size_bits, transmitter, receiver, transmit_power_w, link_type, bandwidth_hz
         )
 
     def _los_probability(self, elevation_angle_deg):

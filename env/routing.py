@@ -1,0 +1,34 @@
+"""DAG 输入和中间结果的确定性传输路径。"""
+
+from dataclasses import dataclass
+
+from env.channel_queue import DirectedChannelKey, EntityKind, EntityRef
+
+
+@dataclass(frozen=True)
+class RoutePlan:
+    """一份数据在实体间依次经过的有向链路。"""
+
+    hops: tuple[DirectedChannelKey, ...]
+
+
+class RoutePlanner:
+    """仅实现题设规定的输入中继与前驱结果直达规则。"""
+
+    def input_route(
+        self, ground_device: EntityRef, owner_member: EntityRef, execution_node: EntityRef
+    ) -> RoutePlan:
+        if ground_device.kind is not EntityKind.GROUND_DEVICE:
+            raise ValueError("原始输入源必须是地面设备")
+        if owner_member.kind is not EntityKind.MEMBER_UAV:
+            raise ValueError("原始输入必须先经过关联 Member UAV")
+        first_hop = DirectedChannelKey(ground_device, owner_member)
+        if execution_node == owner_member:
+            return RoutePlan((first_hop,))
+        return RoutePlan((first_hop, DirectedChannelKey(owner_member, execution_node)))
+
+    @staticmethod
+    def predecessor_route(source_node: EntityRef, target_node: EntityRef) -> RoutePlan:
+        if source_node == target_node:
+            return RoutePlan(())
+        return RoutePlan((DirectedChannelKey(source_node, target_node),))

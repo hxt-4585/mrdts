@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 
 from env.channel_model import ChannelModel, LinkType
+from env.channel_queue import EntityKind, EntityRef
 from env.environment import Environment
 from env.region import Region
 from env.uav import MasterUAV, MemberUAV
@@ -76,6 +77,46 @@ class TestEnvironment(unittest.TestCase):
                 link_type=LinkType.GROUND_TO_AIR,
             ),
         )
+
+    def test_refresh_slot_topology_updates_member_regions_and_user_associations(self):
+        region = Region()
+        region.generate()
+        users = User()
+        users.generate_from_region(region)
+        masters = MasterUAV()
+        masters.generate_from_region(region)
+        members = MemberUAV()
+        members.generate_from_region_and_user(region, users, masters)
+        environment = Environment(members, ChannelModel(), user_transmit_power=0.1)
+        initial_associations = np.array(
+            [environment.member_ids_in_region(region_id)[0] for region_id in users.region_ids],
+            dtype=int,
+        )
+        runtime = environment.create_scheduling_runtime(users.positions, initial_associations)
+        target_region_id = int(next(region_id for region_id in range(1, 5)
+                                    if region_id != members.region_ids[0]))
+        target_row, target_column = np.argwhere(region.region_map == target_region_id)[0]
+        members.positions[0, :2] = (
+            (target_column + 0.5) * region.config.cell_size,
+            (target_row + 0.5) * region.config.cell_size,
+        )
+
+        associations = environment.refresh_slot_topology(region, users.positions, runtime)
+
+        self.assertEqual(members.region_ids[0], target_region_id)
+        np.testing.assert_allclose(
+            runtime.entity_positions[EntityRef(EntityKind.MEMBER_UAV, 0)],
+            members.positions[0],
+        )
+        for user_id, member_id in enumerate(associations):
+            self.assertEqual(
+                members.region_ids[member_id],
+                region.get_region_id(*users.positions[user_id, :2]),
+            )
+            self.assertEqual(
+                runtime.ground_owner_members[EntityRef(EntityKind.GROUND_DEVICE, user_id)],
+                EntityRef(EntityKind.MEMBER_UAV, int(member_id)),
+            )
 
 
 if __name__ == "__main__":

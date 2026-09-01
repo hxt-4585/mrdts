@@ -5,6 +5,7 @@ from typing import Protocol
 
 import numpy as np
 
+from env.channel_queue import EntityRef
 from env.dag_generator import DAG
 from env.dag_runtime import DAGRuntime
 
@@ -33,6 +34,14 @@ class TaskAssignment:
     start_time: float
     finish_time: float
     ingress_relay_id: int | None = None
+
+
+@dataclass(frozen=True)
+class PlacementDecision:
+    """智能体对一个子任务给出的执行位置，不预先伪造执行时间。"""
+
+    execution_node: EntityRef
+    ers_seq: int
 
 
 @dataclass(frozen=True)

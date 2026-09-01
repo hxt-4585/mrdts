@@ -90,6 +90,21 @@ class TestChannelModel(unittest.TestCase):
         self.assertAlmostEqual(delay, data_size_bits / metrics.rate_bps)
         self.assertAlmostEqual(energy, transmit_power_w * delay)
 
+    def test_explicit_directional_bandwidth_override_changes_rate(self):
+        """运行时可为一条有向实体对使用独立带宽。"""
+        transmitter = np.array([0.0, 0.0, 0.0])
+        receiver = np.array([100.0, 0.0, 50.0])
+
+        metrics = self.model.calculate_link(
+            transmitter,
+            receiver,
+            1.0,
+            LinkType.GROUND_TO_AIR,
+            bandwidth_hz=2e6,
+        )
+
+        self.assertEqual(metrics.bandwidth_hz, 2e6)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
