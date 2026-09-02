@@ -14,7 +14,8 @@ from env.dag_generator import DAG
 from env.dag_runtime import DAGRuntime
 from env.routing import RoutePlanner
 from env.server_queue import ServerState
-from env.task_runtime import TaskKey, TaskRuntime, TransferRecord
+from env.slot_result import DAGResult, SlotResult
+from env.task_runtime import TaskKey, TaskRuntime, TaskStatus, TransferRecord
 from methods.contracts import PlacementDecision
 
 
@@ -46,10 +47,22 @@ class SchedulingRuntime:
         directed_bandwidth_hz: Mapping[DirectedChannelKey, float] | None = None,
         member_regions: Mapping[EntityRef, int] | None = None,
         ground_owner_members: Mapping[EntityRef, EntityRef] | None = None,
+        *,
+        slot_start: float = 0.0,
+        max_duration_s: float = 1.0,
     ):
+        self._slot_start = float(slot_start)
+        duration = float(max_duration_s)
+        self._deadline = self._slot_start + duration
+        if (not np.isfinite(self._slot_start) or self._slot_start < 0.0
+                or not np.isfinite(duration) or duration <= 0.0
+                or not np.isfinite(self._deadline) or self._deadline <= self._slot_start):
+            raise ValueError("时隙起点必须有限非负，窗口长度必须有限为正")
+        self._closed = False
+        self._result: SlotResult | None = None
         self.channel_model = channel_model
         self.entity_positions = {
-            entity: np.asarray(position, dtype=float) for entity, position in entity_positions.items()
+            entity: np.array(position, dtype=float, copy=True) for entity, position in entity_positions.items()
         }
         ground_entities = {
             entity for entity in self.entity_positions if entity.kind is EntityKind.GROUND_DEVICE
@@ -86,11 +99,32 @@ class SchedulingRuntime:
         self._event_counter = count()
         self._transfer_counter = count()
         self._next_ers_seq = 0
-        self.now = 0.0
+        self.now = self.slot_start
         if member_regions is not None or ground_owner_members is not None:
             if member_regions is None or ground_owner_members is None:
                 raise ValueError("member_regions 与 ground_owner_members 必须同时提供")
             self.update_topology(member_regions, ground_owner_members)
+
+    @property
+    def slot_start(self) -> float:
+        return self._slot_start
+
+    @property
+    def deadline(self) -> float:
+        return self._deadline
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _require_open(self) -> None:
+        if self.closed:
+            raise RuntimeError("当前时隙运行时已关闭")
+
+    def _require_mutable_topology(self) -> None:
+        self._require_open()
+        if self.tasks or self.now != self.slot_start:
+            raise RuntimeError("提交任务或推进时间后不能修改时隙拓扑")
 
     def submit_dag(
         self,
@@ -101,8 +135,12 @@ class SchedulingRuntime:
         placements: Mapping[int, PlacementDecision],
         epoch_start: float,
     ) -> tuple[TaskKey, ...]:
-        if epoch_start < self.now:
-            raise ValueError("DAG 提交时刻不能早于当前运行时刻")
+        self._require_open()
+        epoch_start = float(epoch_start)
+        if not np.isfinite(epoch_start) or not self.slot_start <= epoch_start < self.deadline:
+            raise ValueError("DAG 提交时刻必须位于当前时隙窗口内")
+        if epoch_start != self.now:
+            raise ValueError("DAG 提交时刻必须等于当前运行时刻；请先推进到提交时刻")
         if owner_member.kind is not EntityKind.MEMBER_UAV:
             raise ValueError("owner_member 必须是 Member UAV")
         if ground_device.kind is not EntityKind.GROUND_DEVICE:
@@ -180,7 +218,10 @@ class SchedulingRuntime:
         return keys
 
     def advance_until(self, absolute_time: float) -> None:
+        self._require_open()
         absolute_time = float(absolute_time)
+        if not np.isfinite(absolute_time) or absolute_time > self.deadline:
+            raise ValueError("推进时刻必须有限且不能超过当前时隙截止时刻")
         if absolute_time < self.now:
             raise ValueError("不能将运行时倒退到过去")
         while self._events and self._events[0][0] <= absolute_time:
@@ -196,6 +237,57 @@ class SchedulingRuntime:
                     self._handle_transfer_finish(payload, timestamp)
             self._dispatch(timestamp)
         self.now = absolute_time
+        if self.now == self.deadline:
+            self._close_slot()
+
+    def finish_slot(self) -> SlotResult:
+        """执行到截止时刻并关闭；重复调用只返回同一份结果。"""
+        if not self.closed:
+            self.advance_until(self.deadline)
+        assert self._result is not None
+        return self._result
+
+    def _close_slot(self) -> None:
+        # 启动时预记了完整作业能耗；取消时扣除窗口以后的部分。
+        for channel in self.channels.values():
+            job = channel.active
+            if job is not None:
+                binding = self._transfer_bindings[job.transfer_id]
+                binding.record.tx_energy_j -= binding.power_w * (job.finish_at - self.deadline)
+                binding.record.tx_energy_j = max(0.0, binding.record.tx_energy_j)
+            channel.queued.clear()
+            channel.active = None
+        for server in self.servers.values():
+            for record in server.running.values():
+                elapsed = self.deadline - record.start_at
+                duration = record.finish_at - record.start_at
+                self.tasks[record.task_key].compute_energy_j = record.energy_j * elapsed / duration
+            server.queue.clear()
+            server.running.clear()
+        for task in self.tasks.values():
+            if task.status is not TaskStatus.FINISHED:
+                task.status = TaskStatus.FAILED
+                task.failed_at = self.deadline
+        for dag in self.dag_runtimes.values():
+            dag.mark_failed(self.deadline)
+        self._result = SlotResult(
+            slot_start=self.slot_start,
+            slot_end=self.deadline,
+            dags=tuple(DAGResult(key, dag.completion_time, dag.failed_at is not None)
+                       for key, dag in sorted(self.dag_runtimes.items())),
+            compute_energy_j=sum(task.compute_energy_j for task in self.tasks.values()),
+            tx_energy_j=sum(record.tx_energy_j for task in self.tasks.values()
+                            for record in (task.input_record, *task.predecessor_records.values())
+                            if record is not None),
+        )
+        self._events.clear()
+        self._ready_for_server.clear()
+        self.channels.clear()
+        self._transfer_channel.clear()
+        self._transfer_bindings.clear()
+        self._outgoing_transfers.clear()
+        self._local_successors.clear()
+        self._closed = True
 
     def trace(self, task_key: TaskKey) -> TaskRuntime:
         return self.tasks[task_key]
@@ -204,21 +296,23 @@ class SchedulingRuntime:
         return self.channels[key]
 
     def update_entity_positions(self, positions: Mapping[EntityRef, np.ndarray]) -> None:
-        """在新时隙提交前更新实体快照，不回溯修改既有传输。"""
+        """仅在当前时隙提交任务前更新实体位置快照。"""
+        self._require_mutable_topology()
         for entity, position in positions.items():
             if entity not in self.entity_positions:
                 raise KeyError(f"运行时不认识实体 {entity}")
             position = np.asarray(position, dtype=float)
             if position.shape != (3,) or not np.isfinite(position).all():
                 raise ValueError("实体位置必须是包含有限数值的 shape=(3,) 向量")
-            self.entity_positions[entity] = position
+            self.entity_positions[entity] = position.copy()
 
     def update_topology(
         self,
         member_regions: Mapping[EntityRef, int],
         ground_owner_members: Mapping[EntityRef, EntityRef],
     ) -> None:
-        """刷新当前时隙内的 Member 区域和用户关联。"""
+        """仅在当前时隙提交任务前刷新 Member 区域和用户关联。"""
+        self._require_mutable_topology()
         expected_members = {
             entity for entity in self.servers if entity.kind is EntityKind.MEMBER_UAV
         }
@@ -374,6 +468,8 @@ class SchedulingRuntime:
                 self._ready_for_server.add(child_key)
 
     def _dispatch(self, at: float) -> None:
+        if at >= self.deadline:
+            return
         for task_key in sorted(
             self._ready_for_server,
             key=lambda key: (self.tasks[key].data_ready_at, self.tasks[key].ers_seq, key),

@@ -19,6 +19,7 @@ class TaskStatus(str, Enum):
     QUEUED_COMPUTE = "queued_compute"
     RUNNING = "running"
     FINISHED = "finished"
+    FAILED = "failed"
 
 
 @dataclass
@@ -48,6 +49,7 @@ class TaskRuntime:
     compute_finish_at: float | None = None
     execution_core_id: int | None = None
     compute_energy_j: float = 0.0
+    failed_at: float | None = None
 
     def mark_input_arrived(self, at: float) -> bool:
         self.input_arrival_at = float(at)

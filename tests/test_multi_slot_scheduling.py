@@ -1,7 +1,5 @@
 """十个时隙的随机飞行与随机卸载集成测试。"""
 
-from pathlib import Path
-import tomllib
 import unittest
 
 import numpy as np
@@ -39,15 +37,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             user_transmit_power=self.users.config.transmit_power,
             user_core_frequency=self.users.config.core_frequency,
         )
-        self.user_member_ids = np.array(
-            [
-                self.environment.member_ids_in_region(region_id)[0]
-                for region_id in self.users.region_ids
-            ],
-            dtype=int,
-        )
-        with (Path(__file__).parents[1] / "config" / "scheduling.toml").open("rb") as file:
-            self.max_duration_s = tomllib.load(file)["scheduling"]["max_duration_s"]
+        self.max_duration_s = self.environment.scheduling_config.max_duration_s
         self.rng = np.random.default_rng(20260901)
 
     def test_random_flight_and_random_placement_finish_two_dags_per_slot_before_deadline(self):
@@ -86,7 +76,12 @@ class TestMultiSlotScheduling(unittest.TestCase):
                 )
 
             slot_end = slot_start + self.max_duration_s
-            self.runtime.advance_until(slot_end)
+            result = self.environment.end_slot()
+            self.assertEqual(result.slot_end, slot_end)
+            self.assertEqual(len(result.finished_dags), self.DAGS_PER_SLOT)
+            self.assertFalse(result.failed_dags)
+            self.assertIsNone(self.environment.runtime)
+            self.assertTrue(self.runtime.closed)
             for task_key in slot_task_keys:
                 task = self.runtime.trace(task_key)
                 self.assertEqual(task.status, TaskStatus.FINISHED)
@@ -125,12 +120,19 @@ class TestMultiSlotScheduling(unittest.TestCase):
             },
             epoch_start=0.0,
         )
-        self.runtime.advance_until(self.max_duration_s)
+        self.runtime.advance_until(self.max_duration_s / 2.0)
         previous_runtime = self.runtime
         self.assertFalse(next(iter(previous_runtime.dag_runtimes.values())).is_finished)
         self.assertTrue(previous_runtime.servers[ground].running)
         self.assertTrue(previous_runtime.servers[ground].queue)
         self.assertTrue(any(channel.active is not None for channel in previous_runtime.channels.values()))
+
+        result = self.environment.end_slot()
+        self.assertEqual(result.failed_dags, ((owner.index, ground.index, 0),))
+        self.assertTrue(previous_runtime.closed)
+        self.assertTrue(all(task.status is TaskStatus.FAILED for task in previous_runtime.tasks.values()))
+        with self.assertRaisesRegex(RuntimeError, "关闭"):
+            previous_runtime.advance_until(2.0 * self.max_duration_s)
 
         self._start_slot(actions)
         self._assert_empty_scheduling_state()
@@ -144,7 +146,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             placements={0: PlacementDecision(ground, 0)},
             epoch_start=self.max_duration_s,
         )
-        self.runtime.advance_until(2.0 * self.max_duration_s)
+        self.environment.end_slot()
         task = self.runtime.trace(keys[0])
         self.assertEqual(task.status, TaskStatus.FINISHED)
         self.assertEqual(task.ers_seq, 0)
@@ -156,14 +158,9 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.assertFalse(next(iter(previous_runtime.dag_runtimes.values())).is_finished)
 
     def _start_slot(self, actions):
-        self.members.apply_flight_actions(actions, self.region.config.side_length)
-        # 过渡拓扑接口需要当期运行时；先新建空实例，刷新完成后再提交 DAG。
-        self.runtime = self.environment.create_scheduling_runtime(
-            self.users.positions, self.user_member_ids
-        )
-        self.user_member_ids = self.environment.refresh_slot_topology(
-            self.region, self.users.positions, self.runtime
-        )
+        self.environment.begin_slot(self.region, self.users.positions, actions)
+        self.runtime = self.environment.runtime
+        self.user_member_ids = self.environment.user_member_ids.copy()
 
     def _assert_empty_scheduling_state(self):
         self.assertEqual(self.runtime.tasks, {})

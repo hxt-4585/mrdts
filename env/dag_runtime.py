@@ -18,6 +18,7 @@ class DAGRuntime:
     successors: dict[int, set[int]] = field(init=False)
     finished_at: dict[int, float] = field(default_factory=dict, init=False)
     ready_node_ids: set[int] = field(init=False)
+    failed_at: float | None = field(default=None, init=False)
 
     def __post_init__(self):
         self.remaining_predecessors = {node_id: 0 for node_id in range(self.dag.node_num)}
@@ -35,6 +36,8 @@ class DAGRuntime:
 
     def mark_finished(self, node_id: int, finish_time: float) -> None:
         """记录一个就绪子任务完成，并释放其已满足全部依赖的后继。"""
+        if self.failed_at is not None:
+            raise RuntimeError("失败 DAG 不能继续执行")
         if node_id not in self.ready_node_ids:
             raise ValueError(f"子任务 {node_id} 当前并非就绪状态，不能完成。")
 
@@ -45,6 +48,12 @@ class DAGRuntime:
             self.remaining_predecessors[successor] -= 1
             if self.remaining_predecessors[successor] == 0:
                 self.ready_node_ids.add(successor)
+
+    def mark_failed(self, at: float) -> None:
+        """截止时刻终止未完成 DAG，保留已完成节点的记录。"""
+        if not self.is_finished and self.failed_at is None:
+            self.failed_at = float(at)
+            self.ready_node_ids.clear()
 
     @property
     def is_finished(self) -> bool:

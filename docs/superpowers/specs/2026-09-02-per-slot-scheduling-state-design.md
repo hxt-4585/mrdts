@@ -24,6 +24,8 @@
   后续决定（2026-09-02）：当前不启用通信覆盖半径约束，用户关联采用“同区域最近 Member”，本区域 Member 执行候选也不按覆盖半径筛选。`coverage_radius` 配置及其字段暂时保留，覆盖半径检查不属于正式强化学习环境必须补齐的当前模型要求。
 - 事件运行时仍可推进到任意当前时隙内的绝对时间，但不承诺跨时隙复用。
 
+后续实现（2026-09-02）：`Environment.begin_slot/end_slot` 已负责正式时隙开始和结束；运行时绑定窗口并在截止时自动关闭，关闭后禁止继续推进、提交或更新拓扑。未完成 DAG 标记失败，环境释放旧运行时引用。详见 `2026-09-02-environment-slot-lifecycle-design.md`。
+
 ## 验证
 
 - 测试确认 `MemberUAV` 不再暴露 `core_available_at` 和 `schedule_computation()`。

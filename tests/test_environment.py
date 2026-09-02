@@ -110,11 +110,6 @@ class TestEnvironment(unittest.TestCase):
         members = MemberUAV()
         members.generate_from_region_and_user(region, users, masters)
         environment = Environment(members, ChannelModel(), user_transmit_power=0.1)
-        initial_associations = np.array(
-            [environment.member_ids_in_region(region_id)[0] for region_id in users.region_ids],
-            dtype=int,
-        )
-        runtime = environment.create_scheduling_runtime(users.positions, initial_associations)
         target_region_id = int(next(region_id for region_id in range(1, 5)
                                     if region_id != members.region_ids[0]))
         target_row, target_column = np.argwhere(region.region_map == target_region_id)[0]
@@ -123,7 +118,8 @@ class TestEnvironment(unittest.TestCase):
             (target_row + 0.5) * region.config.cell_size,
         )
 
-        associations = environment.refresh_slot_topology(region, users.positions, runtime)
+        associations = environment.refresh_slot_topology(region, users.positions)
+        runtime = environment.create_scheduling_runtime(users.positions, associations)
 
         self.assertEqual(members.region_ids[0], target_region_id)
         np.testing.assert_allclose(

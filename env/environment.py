@@ -1,16 +1,18 @@
-"""仿真环境的最小资源与链路能力。"""
+"""仿真环境的资源、拓扑与时隙生命周期。"""
 
 import numpy as np
 
 from env.channel_model import ChannelModel
+from env.settings import SchedulingConfig
+from env.slot_result import SlotResult
 from env.uav import MemberUAV
 
 
 class Environment:
     """协调现有 UAV 计算资源与信道模型的最小环境内核。
 
-    本类暂不管理时隙、动作、奖励或 DAG 生命周期；这些能力将在环境主线
-    完成后逐步加入。时隙内计算资源状态由 ``SchedulingRuntime`` 唯一管理。
+    本类通过 begin_slot/end_slot 管理飞行、拓扑和当期运行时的生命周期。
+    观测、策略和奖励尚未接入。时隙内计算资源状态由 SchedulingRuntime 唯一管理。
     """
 
     def __init__(
@@ -19,6 +21,7 @@ class Environment:
         channel_model: ChannelModel,
         user_transmit_power: float,
         user_core_frequency: float = 1e9,
+        scheduling_config: SchedulingConfig | None = None,
     ):
         self.members = members
         self.channel_model = channel_model
@@ -27,6 +30,46 @@ class Environment:
         if not np.isfinite(self.user_core_frequency) or self.user_core_frequency <= 0.0:
             raise ValueError("user_core_frequency 必须为有限正数")
         self.user_member_ids = None
+        self.scheduling_config = scheduling_config if scheduling_config is not None else SchedulingConfig.default()
+        self._runtime = None
+        self._next_slot_start = 0.0
+
+    @property
+    def runtime(self):
+        """当前时隙运行时；时隙结束后为 None。"""
+        return self._runtime
+
+    def begin_slot(self, region, user_positions, normalized_actions) -> np.ndarray:
+        """飞行、刷新物理拓扑后新建运行时，返回逐 Member 越界标记。"""
+        if self._runtime is not None:
+            raise RuntimeError("当前时隙尚未结束，请先调用 end_slot")
+        previous_positions = self.members.positions.copy()
+        previous_regions = self.members.region_ids.copy()
+        previous_counts = self.members.region_member_counts.copy()
+        previous_associations = self.user_member_ids
+        try:
+            violations = self.members.apply_flight_actions(normalized_actions, region.config.side_length)
+            associations = self.refresh_slot_topology(region, user_positions)
+            runtime = self.create_scheduling_runtime(
+                user_positions, associations, slot_start=self._next_slot_start
+            )
+        except Exception:
+            self.members.positions[:] = previous_positions
+            self.members.region_ids[:] = previous_regions
+            self.members.region_member_counts[:] = previous_counts
+            self.user_member_ids = previous_associations
+            raise
+        self._runtime = runtime
+        return violations
+
+    def end_slot(self) -> SlotResult:
+        """完成截止结算并释放运行时，只返回不含队列的结果。"""
+        if self._runtime is None:
+            raise RuntimeError("没有可结束的活动时隙")
+        result = self._runtime.finish_slot()
+        self._next_slot_start = result.slot_end
+        self._runtime = None
+        return result
 
     @property
     def member_transmit_power(self) -> float:
@@ -64,8 +107,10 @@ class Environment:
             data_size_bits, transmitter, receiver, transmit_power_w, link_type
         )
 
-    def create_scheduling_runtime(self, user_positions, user_member_ids):
-        """按当前实体快照创建仅供本时隙使用的调度运行时。"""
+    def create_scheduling_runtime(self, user_positions, user_member_ids, *, slot_start=0.0):
+        """创建绑定单个窗口的运行时；连续时隙应使用 begin_slot/end_slot。"""
+        if self._runtime is not None:
+            raise RuntimeError("当前时隙尚未结束，不能创建替代运行时")
         from env.channel_queue import EntityKind, EntityRef
         from env.event_runtime import SchedulingRuntime, ServerSpec
 
@@ -116,15 +161,17 @@ class Environment:
             powers,
             member_regions=member_regions,
             ground_owner_members=ground_owner_members,
+            slot_start=slot_start,
+            max_duration_s=self.scheduling_config.max_duration_s,
         )
 
-    def refresh_slot_topology(self, region, user_positions, runtime):
-        """在 Member 飞行结束后刷新区域、用户关联和当期运行时快照。
+    def refresh_slot_topology(self, region, user_positions):
+        """在创建运行时前刷新物理区域和用户关联。
 
         用户固定在地面；每位用户关联到其当前区域内距离最近的 Member UAV。
-        传入的 runtime 只属于当前时隙；正式环境应在下一时隙创建新运行时。
         """
-        from env.channel_queue import EntityKind, EntityRef
+        if self._runtime is not None:
+            raise RuntimeError("当前时隙尚未结束，不能刷新物理拓扑")
 
         user_positions = np.asarray(user_positions, dtype=float)
         if user_positions.ndim != 2 or user_positions.shape[1] != 3:
@@ -137,7 +184,6 @@ class Environment:
             [region.get_region_id(*position[:2]) for position in self.members.positions[: self.bs_index]],
             dtype=np.int32,
         )
-        self.members.update_region_ids(member_ids, member_region_ids)
         user_region_ids = np.array(
             [region.get_region_id(*position[:2]) for position in user_positions], dtype=np.int32
         )
@@ -151,23 +197,6 @@ class Environment:
             )
             associations[user_id] = candidates[int(np.argmin(horizontal_distances))]
 
-        entity_positions = {
-            EntityRef(EntityKind.MEMBER_UAV, int(member_id)): self.members.positions[member_id]
-            for member_id in member_ids
-        }
-        entity_positions[EntityRef(EntityKind.BS, 0)] = self.members.positions[self.bs_index]
-        runtime.update_entity_positions(entity_positions)
-        runtime.update_topology(
-            member_regions={
-                EntityRef(EntityKind.MEMBER_UAV, int(member_id)): int(member_region_ids[member_id])
-                for member_id in member_ids
-            },
-            ground_owner_members={
-                EntityRef(EntityKind.GROUND_DEVICE, user_id): EntityRef(
-                    EntityKind.MEMBER_UAV, int(member_id)
-                )
-                for user_id, member_id in enumerate(associations)
-            },
-        )
+        self.members.update_region_ids(member_ids, member_region_ids)
         self.user_member_ids = associations
         return associations.copy()

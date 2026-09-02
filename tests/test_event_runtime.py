@@ -69,7 +69,7 @@ class TestSchedulingRuntime(unittest.TestCase):
         self.assertIsNotNone(
             self.runtime.channel_state(DirectedChannelKey(self.ground, self.member)).active
         )
-        self.runtime.advance_until(10.0)
+        self.runtime.advance_until(self.runtime.deadline)
         parent = self.runtime.trace(keys[0])
         child = self.runtime.trace(keys[1])
 
@@ -119,7 +119,8 @@ class TestSchedulingRuntime(unittest.TestCase):
         key = DirectedChannelKey(self.ground, self.member)
         first = self.runtime.channel_state(key).active
         self.runtime.advance_until(first.finish_at / 2.0)
-        self.runtime.update_entity_positions({self.member: np.array([150.0, 0.0, 10.0])})
+        with self.assertRaisesRegex(RuntimeError, "拓扑"):
+            self.runtime.update_entity_positions({self.member: np.array([150.0, 0.0, 10.0])})
 
         self.runtime.advance_until(first.finish_at)
 
@@ -264,15 +265,16 @@ class TestSchedulingRuntime(unittest.TestCase):
             epoch_start=0.0,
         )
 
-        self.runtime.advance_until(10.0)
+        channel_keys = set(self.runtime.channels)
+        self.runtime.advance_until(self.runtime.deadline)
 
         parent = self.runtime.trace(keys[0])
         child = self.runtime.trace(keys[1])
         self.assertEqual(parent.status.value, "finished")
         self.assertEqual(child.status.value, "finished")
         self.assertEqual(len(child.predecessor_records[keys[0]].transfer_ids), 2)
-        self.assertIn(DirectedChannelKey(self.bs, self.member), self.runtime.channels)
-        self.assertIn(DirectedChannelKey(self.member, self.ground), self.runtime.channels)
+        self.assertIn(DirectedChannelKey(self.bs, self.member), channel_keys)
+        self.assertIn(DirectedChannelKey(self.member, self.ground), channel_keys)
 
 
 if __name__ == "__main__":
