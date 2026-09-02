@@ -37,21 +37,13 @@ class TestEnvironment(unittest.TestCase):
         self.assertNotIn(members.bs_index, member_ids)
         self.assertEqual(environment.bs_index, members.bs_index)
 
-    def test_estimate_does_not_reserve_but_reserve_updates_earliest_core(self):
+    def test_does_not_expose_a_second_compute_reservation_state(self):
+        """Environment 不应在 SchedulingRuntime 之外维护计算预留状态。"""
         members = self._generate_members()
         environment = Environment(members, ChannelModel(), user_transmit_power=0.1)
-        server_id = 0
-        before = members.core_available_at.copy()
 
-        start_time, estimated_finish = environment.estimate_finish_time(
-            server_id, cpu_cycles=10e9, data_ready_time=0.5
-        )
-
-        np.testing.assert_array_equal(members.core_available_at, before)
-        finish_time = environment.reserve_computation(server_id, cpu_cycles=10e9, data_ready_time=0.5)
-        self.assertEqual(start_time, 0.5)
-        self.assertEqual(finish_time, estimated_finish)
-        self.assertEqual(members.core_available_at[server_id, 0], finish_time)
+        self.assertFalse(hasattr(environment, "estimate_finish_time"))
+        self.assertFalse(hasattr(environment, "reserve_computation"))
 
     def test_delegates_transmission_delay_to_channel_model(self):
         channel_model = ChannelModel()
@@ -77,6 +69,36 @@ class TestEnvironment(unittest.TestCase):
                 link_type=LinkType.GROUND_TO_AIR,
             ),
         )
+
+    def test_registers_each_ground_device_as_a_single_core_zero_energy_server(self):
+        members = self._generate_members()
+        environment = Environment(
+            members,
+            ChannelModel(),
+            user_transmit_power=0.1,
+            user_core_frequency=1e9,
+        )
+        user_positions = np.array(
+            [[0.0, 0.0, 0.0], [10.0, 10.0, 0.0]], dtype=float
+        )
+        runtime = environment.create_scheduling_runtime(
+            user_positions,
+            np.array([0, 0], dtype=int),
+        )
+
+        for user_id in range(len(user_positions)):
+            server = runtime.servers[EntityRef(EntityKind.GROUND_DEVICE, user_id)]
+            self.assertEqual(server.core_frequencies, (1e9,))
+            self.assertEqual(server.capacitance_factor, 0.0)
+
+    def test_rejects_non_positive_ground_core_frequency(self):
+        with self.assertRaisesRegex(ValueError, "user_core_frequency"):
+            Environment(
+                self._generate_members(),
+                ChannelModel(),
+                user_transmit_power=0.1,
+                user_core_frequency=0.0,
+            )
 
     def test_refresh_slot_topology_updates_member_regions_and_user_associations(self):
         region = Region()

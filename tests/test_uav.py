@@ -1,7 +1,6 @@
 """UAV 集合基础状态测试。"""
 
 import unittest
-from dataclasses import replace
 
 import numpy as np
 
@@ -192,16 +191,19 @@ class TestMemberUAV(unittest.TestCase):
             np.array([0.4, -0.2], dtype=np.float32), (members.member_uav_count, 1)
         )
 
-        positions = members.apply_flight_actions(normalized_actions)
+        violations = members.apply_flight_actions(
+            normalized_actions, region.config.side_length
+        )
 
         self.assertEqual(members.config.member_slot_energy, 145.0)
         self.assertEqual(members.config.flight_duration, 0.5)
         self.assertEqual(members.config.max_horizontal_speed, 10.0)
+        self.assertFalse(violations.any())
         np.testing.assert_allclose(
-            positions[: members.bs_index, :2],
+            members.positions[: members.bs_index, :2],
             original_positions[: members.bs_index, :2] + np.array([2.0, -1.0]),
         )
-        np.testing.assert_array_equal(positions[:, 2], original_positions[:, 2])
+        np.testing.assert_array_equal(members.positions[:, 2], original_positions[:, 2])
 
     def test_flight_actions_leave_bs_position_unchanged(self):
         """Member 飞行仅改变 Member 行，不得移动最后一行的 BS。"""
@@ -216,31 +218,41 @@ class TestMemberUAV(unittest.TestCase):
         original_bs_position = members.positions[members.bs_index].copy()
 
         members.apply_flight_actions(
-            np.zeros((members.member_uav_count, 2), dtype=np.float32)
+            np.zeros((members.member_uav_count, 2), dtype=np.float32),
+            region.config.side_length,
         )
 
         np.testing.assert_array_equal(members.positions[members.bs_index], original_bs_position)
 
-    def test_schedules_computation_after_the_only_core_becomes_available(self):
-        """单核 Member 上的后续子任务必须等待前一个子任务完成。"""
-        config = replace(MemberUAV().config, member_core_count=1)
-        members = self._generate_members(config)
+    def test_rejects_each_out_of_bounds_flight_and_returns_violation_mask(self):
+        """越界 Member 保持原位，同时不阻塞同批次内的合法 Member。"""
+        members = self._generate_members()
+        original_positions = members.positions.copy()
+        members.positions[0, :2] = np.array([1.0, 1.0], dtype=np.float32)
+        original_positions[0] = members.positions[0]
+        actions = np.zeros((members.member_uav_count, 2), dtype=np.float32)
+        actions[0] = [-1.0, 0.0]
+        actions[1] = [0.2, 0.0]
 
-        first_finish = members.schedule_computation(0, cpu_cycles=20e9, data_ready_time=0.0)
-        second_finish = members.schedule_computation(0, cpu_cycles=10e9, data_ready_time=0.5)
+        violations = members.apply_flight_actions(
+            actions, Region().config.side_length
+        )
 
-        self.assertEqual(first_finish, 2.0)
-        self.assertEqual(second_finish, 3.0)
-        self.assertEqual(members.core_available_at[0, 0], 3.0)
+        self.assertEqual(violations.shape, (members.member_uav_count,))
+        self.assertEqual(violations.dtype, np.bool_)
+        self.assertTrue(violations[0])
+        self.assertFalse(violations[1])
+        np.testing.assert_array_equal(members.positions[0], original_positions[0])
+        np.testing.assert_allclose(
+            members.positions[1, :2], original_positions[1, :2] + [1.0, 0.0]
+        )
+        np.testing.assert_array_equal(
+            members.positions[members.bs_index], original_positions[members.bs_index]
+        )
 
-    def test_schedules_computation_on_earliest_available_core(self):
-        """多核 Member 应选择最早可用的核心，而不是固定使用某一核心。"""
+    def test_does_not_store_runtime_core_availability(self):
+        """Member 只保存静态计算能力，不保存时隙内核心占用状态。"""
         members = self._generate_members()
 
-        members.schedule_computation(0, cpu_cycles=20e9, data_ready_time=0.0)
-        second_finish = members.schedule_computation(0, cpu_cycles=10e9, data_ready_time=0.0)
-        third_finish = members.schedule_computation(0, cpu_cycles=10e9, data_ready_time=0.0)
-
-        self.assertEqual(second_finish, 1.0)
-        self.assertEqual(third_finish, 2.0)
-        np.testing.assert_array_equal(members.core_available_at[0, :2], [2.0, 2.0])
+        self.assertFalse(hasattr(members, "core_available_at"))
+        self.assertFalse(hasattr(members, "schedule_computation"))

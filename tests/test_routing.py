@@ -34,8 +34,53 @@ class TestRoutePlanner(unittest.TestCase):
             ),
         )
 
+    def test_input_executed_on_source_ground_is_local(self):
+        route = self.planner.input_route(self.ground, self.owner, self.ground)
+
+        self.assertEqual(route.hops, ())
+
+    def test_result_from_ground_to_bs_uses_owner_member_as_relay(self):
+        route = self.planner.predecessor_route(
+            self.ground,
+            self.bs,
+            ground_device=self.ground,
+            owner_member=self.owner,
+        )
+
+        self.assertEqual(
+            route.hops,
+            (
+                DirectedChannelKey(self.ground, self.owner),
+                DirectedChannelKey(self.owner, self.bs),
+            ),
+        )
+
+    def test_result_from_bs_to_ground_uses_owner_member_as_relay(self):
+        route = self.planner.predecessor_route(
+            self.bs,
+            self.ground,
+            ground_device=self.ground,
+            owner_member=self.owner,
+        )
+
+        self.assertEqual(
+            route.hops,
+            (
+                DirectedChannelKey(self.bs, self.owner),
+                DirectedChannelKey(self.owner, self.ground),
+            ),
+        )
+
     def test_result_between_same_execution_node_is_local(self):
-        self.assertEqual(self.planner.predecessor_route(self.bs, self.bs).hops, ())
+        self.assertEqual(
+            self.planner.predecessor_route(
+                self.bs,
+                self.bs,
+                ground_device=self.ground,
+                owner_member=self.owner,
+            ).hops,
+            (),
+        )
 
 
 if __name__ == "__main__":

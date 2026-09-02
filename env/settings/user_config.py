@@ -16,6 +16,7 @@ class UserConfig:
     center_spread_ratio: float
     seed: int | None
     transmit_power: float
+    core_frequency: float
 
     @classmethod
     def default(cls) -> "UserConfig":
@@ -28,6 +29,7 @@ class UserConfig:
         with Path(path).open("rb") as file:
             data = tomllib.load(file)
         population = data["population"]
+        computation = data["computation"]
         return cls(
             total_users=population["total_users"],
             min_users_per_region=population["min_users_per_region"],
@@ -36,4 +38,5 @@ class UserConfig:
             center_spread_ratio=population["center_spread_ratio"],
             seed=population.get("seed"),
             transmit_power=population["transmit_power"],
+            core_frequency=computation["core_frequency"],
         )

@@ -13,3 +13,7 @@ center_spread_ratio = 0.25
 seed = 60
 # 地面用户向 UAV 上传任务数据时的发射功率（W）。
 transmit_power = 0.1
+
+[computation]
+# 每台地面设备固定为单核；该参数为本地核心频率（CPU cycles/s）。
+core_frequency = 1000000000.0

@@ -10,7 +10,7 @@ class Environment:
     """协调现有 UAV 计算资源与信道模型的最小环境内核。
 
     本类暂不管理时隙、动作、奖励或 DAG 生命周期；这些能力将在环境主线
-    完成后逐步加入。计算资源状态仍归 ``MemberUAV`` 所有。
+    完成后逐步加入。时隙内计算资源状态由 ``SchedulingRuntime`` 唯一管理。
     """
 
     def __init__(
@@ -18,10 +18,14 @@ class Environment:
         members: MemberUAV,
         channel_model: ChannelModel,
         user_transmit_power: float,
+        user_core_frequency: float = 1e9,
     ):
         self.members = members
         self.channel_model = channel_model
         self.user_transmit_power = user_transmit_power
+        self.user_core_frequency = float(user_core_frequency)
+        if not np.isfinite(self.user_core_frequency) or self.user_core_frequency <= 0.0:
+            raise ValueError("user_core_frequency 必须为有限正数")
         self.user_member_ids = None
 
     @property
@@ -47,23 +51,6 @@ class Environment:
         core_count = self.members.core_counts[server_id]
         return self.members.core_frequencies[server_id, :core_count]
 
-    def estimate_finish_time(
-        self, server_id: int, cpu_cycles: float, data_ready_time: float
-    ) -> tuple[float, float]:
-        """预估最早可用核心上的开始与完成时刻，不修改资源状态。"""
-        core_count = self.members.core_counts[server_id]
-        core_available_at = self.members.core_available_at[server_id, :core_count]
-        core_id = int(np.argmin(core_available_at))
-        start_time = max(data_ready_time, core_available_at[core_id])
-        finish_time = start_time + cpu_cycles / self.members.core_frequencies[server_id, core_id]
-        return start_time, finish_time
-
-    def reserve_computation(
-        self, server_id: int, cpu_cycles: float, data_ready_time: float
-    ) -> float:
-        """在指定计算节点占用最早可用核心，并返回任务完成时刻。"""
-        return self.members.schedule_computation(server_id, cpu_cycles, data_ready_time)
-
     def transmission_delay_s(
         self,
         data_size_bits: float,
@@ -78,7 +65,7 @@ class Environment:
         )
 
     def create_scheduling_runtime(self, user_positions, user_member_ids):
-        """按当前实体快照创建可跨时隙保存状态的调度运行时。"""
+        """按当前实体快照创建仅供本时隙使用的调度运行时。"""
         from env.channel_queue import EntityKind, EntityRef
         from env.event_runtime import SchedulingRuntime, ServerSpec
 
@@ -110,6 +97,7 @@ class Environment:
             ground = EntityRef(EntityKind.GROUND_DEVICE, user_id)
             positions[ground] = position
             powers[ground] = self.user_transmit_power
+            servers[ground] = ServerSpec((self.user_core_frequency,), 0.0)
         member_regions = {
             EntityRef(EntityKind.MEMBER_UAV, member_id): int(self.members.region_ids[member_id])
             for member_id in range(self.bs_index)
@@ -131,10 +119,10 @@ class Environment:
         )
 
     def refresh_slot_topology(self, region, user_positions, runtime):
-        """在 Member 飞行结束后刷新区域、用户关联和运行时位置快照。
+        """在 Member 飞行结束后刷新区域、用户关联和当期运行时快照。
 
         用户固定在地面；每位用户关联到其当前区域内距离最近的 Member UAV。
-        该方法只改变后续调度所见的拓扑，不重建运行中的信道、计算或 DAG 状态。
+        传入的 runtime 只属于当前时隙；正式环境应在下一时隙创建新运行时。
         """
         from env.channel_queue import EntityKind, EntityRef
 

@@ -1,4 +1,4 @@
-"""多 DAG 传输与计算的持久化离散事件运行时。"""
+"""单个时隙内多 DAG 传输与计算的离散事件运行时。"""
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -51,6 +51,20 @@ class SchedulingRuntime:
         self.entity_positions = {
             entity: np.asarray(position, dtype=float) for entity, position in entity_positions.items()
         }
+        ground_entities = {
+            entity for entity in self.entity_positions if entity.kind is EntityKind.GROUND_DEVICE
+        }
+        ground_servers = {entity for entity in servers if entity.kind is EntityKind.GROUND_DEVICE}
+        if ground_servers != ground_entities:
+            raise ValueError("每个地面设备必须恰有一个本地计算服务器")
+        for ground in ground_servers:
+            spec = servers[ground]
+            if len(spec.core_frequencies) != 1 or spec.capacitance_factor != 0.0:
+                raise ValueError("地面设备服务器必须为单核且采用零计算能耗")
+        bs_entities = {entity for entity in servers if entity.kind is EntityKind.BS}
+        if len(bs_entities) != 1:
+            raise ValueError("调度运行时必须恰有一个全局 BS")
+        self.global_bs = next(iter(bs_entities))
         self.servers = {
             entity: ServerState(entity, tuple(spec.core_frequencies), spec.capacitance_factor)
             for entity, spec in servers.items()
@@ -88,7 +102,7 @@ class SchedulingRuntime:
         epoch_start: float,
     ) -> tuple[TaskKey, ...]:
         if epoch_start < self.now:
-            raise ValueError("新时隙不能早于当前运行时刻")
+            raise ValueError("DAG 提交时刻不能早于当前运行时刻")
         if owner_member.kind is not EntityKind.MEMBER_UAV:
             raise ValueError("owner_member 必须是 Member UAV")
         if ground_device.kind is not EntityKind.GROUND_DEVICE:
@@ -126,15 +140,25 @@ class SchedulingRuntime:
         for node, key in node_keys.items():
             task = self.tasks[key]
             route = self.route_planner.input_route(ground_device, owner_member, task.execution_node)
-            task.input_record = self._append_route(
-                pending, route.hops, task, task.input_bits, epoch_start, is_input=True
-            )
+            if not route.hops:
+                task.input_record = TransferRecord(
+                    (), start_at=float(epoch_start), finish_at=float(epoch_start)
+                )
+                if task.mark_input_arrived(epoch_start):
+                    self._ready_for_server.add(task.key)
+            else:
+                task.input_record = self._append_route(
+                    pending, route.hops, task, task.input_bits, epoch_start, is_input=True
+                )
         for parent, child in dag.edges:
             parent_task = self.tasks[node_keys[parent]]
             child_task = self.tasks[node_keys[child]]
             result_bits = float(dag.edge_features[(parent, child)]) * 8.0 * 1024.0
             route = self.route_planner.predecessor_route(
-                parent_task.execution_node, child_task.execution_node
+                parent_task.execution_node,
+                child_task.execution_node,
+                ground_device,
+                owner_member,
             )
             if not route.hops:
                 record = TransferRecord(())
@@ -194,7 +218,7 @@ class SchedulingRuntime:
         member_regions: Mapping[EntityRef, int],
         ground_owner_members: Mapping[EntityRef, EntityRef],
     ) -> None:
-        """在时隙边界刷新 Member 区域和用户关联，不重建资源队列。"""
+        """刷新当前时隙内的 Member 区域和用户关联。"""
         expected_members = {
             entity for entity in self.servers if entity.kind is EntityKind.MEMBER_UAV
         }
@@ -276,18 +300,24 @@ class SchedulingRuntime:
         ground_device: EntityRef,
         placements: Mapping[int, PlacementDecision],
     ) -> None:
-        if self.member_regions is None:
-            return
+        if self.member_regions is None or self.ground_owner_members is None:
+            raise RuntimeError("提交 DAG 前必须提供当前时隙拓扑")
         if self.ground_owner_members[ground_device] != owner_member:
             raise ValueError("地面设备当前关联的 Member UAV 与 owner_member 不一致")
         owner_region_id = self.member_regions[owner_member]
         for decision in placements.values():
             execution_node = decision.execution_node
-            if execution_node.kind is EntityKind.MEMBER_UAV:
+            if execution_node.kind is EntityKind.GROUND_DEVICE:
+                if execution_node != ground_device:
+                    raise ValueError("子任务只能在自身地面设备本地执行")
+            elif execution_node.kind is EntityKind.MEMBER_UAV:
                 if self.member_regions.get(execution_node) != owner_region_id:
                     raise ValueError("Member UAV 执行节点必须与任务 owner 位于同一区域")
-            elif execution_node.kind is not EntityKind.BS:
-                raise ValueError("执行节点只能是 Member UAV 或 BS")
+            elif execution_node.kind is EntityKind.BS:
+                if execution_node != self.global_bs:
+                    raise ValueError("子任务只能卸载到唯一的全局 BS")
+            else:
+                raise ValueError("执行节点只能是自身地面设备、Member UAV 或 BS")
 
     def _default_bandwidth_hz(self, hop: DirectedChannelKey) -> float:
         config = self.channel_model.config
