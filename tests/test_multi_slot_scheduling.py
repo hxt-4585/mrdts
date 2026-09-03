@@ -12,8 +12,8 @@ from env.task_runtime import TaskStatus
 from env.uav import MasterUAV, MemberUAV
 from env.region import Region
 from env.user import User
-from methods.contracts import PlacementDecision
-from methods.heft_priority import HEFTPriority
+from methods.contracts import DAGRequest, PlacementDecision
+from methods.ers import ERS
 
 
 class TestMultiSlotScheduling(unittest.TestCase):
@@ -47,33 +47,21 @@ class TestMultiSlotScheduling(unittest.TestCase):
                 self.rng.uniform(-1.0, 1.0, size=(self.members.member_uav_count, 2))
             )
             self._assert_empty_scheduling_state()
-            slot_task_keys = []
+            requests = []
             for dag_offset in range(self.DAGS_PER_SLOT):
                 user_id = int(self.rng.integers(self.users.num_users))
                 owner_id = int(self.user_member_ids[user_id])
                 dag = self._small_dag()
-                order = HEFTPriority.order(
-                    dag,
-                    average_compute_s={0: 0.0003, 1: 0.0004, 2: 0.0004},
-                    average_edge_comm_s={(0, 1): 0.0001, (0, 2): 0.0001},
-                )
-                placements = {
-                    node_id: PlacementDecision(
-                        execution_node=self._random_execution_node(user_id, owner_id),
-                        ers_seq=order.index(node_id),
-                    )
-                    for node_id in range(dag.node_num)
-                }
-                slot_task_keys.extend(
-                    self.runtime.submit_dag(
-                        dag_id=slot_id * self.DAGS_PER_SLOT + dag_offset,
-                        dag=dag,
-                        owner_member=EntityRef(EntityKind.MEMBER_UAV, owner_id),
-                        ground_device=EntityRef(EntityKind.GROUND_DEVICE, user_id),
-                        placements=placements,
-                        epoch_start=slot_start,
-                    )
-                )
+                requests.append(DAGRequest(
+                    dag_id=slot_id * self.DAGS_PER_SLOT + dag_offset, dag=dag,
+                    owner_member=EntityRef(EntityKind.MEMBER_UAV, owner_id),
+                    ground_device=EntityRef(EntityKind.GROUND_DEVICE, user_id)))
+
+            plan = ERS(self.runtime).plan(requests)
+            placements = {key: PlacementDecision(self._random_execution_node(key.user_id, key.owner_member_id), seq)
+                          for seq, key in enumerate(plan.order)}
+            slot_task_keys = self.runtime.submit_dags(requests, placements, slot_start)
+            self.assertEqual(tuple(sorted(slot_task_keys, key=lambda key: self.runtime.trace(key).ers_seq)), plan.order)
 
             slot_end = slot_start + self.max_duration_s
             result = self.environment.end_slot()

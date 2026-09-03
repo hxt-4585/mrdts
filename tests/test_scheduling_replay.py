@@ -55,6 +55,19 @@ class TestSchedulingReplay(unittest.TestCase):
         self.assertAlmostEqual(sum(x["energy_j"] for x in data["transfers"]),
                                data["summary"]["tx_energy_j"])
 
+    def test_replay_sequence_comes_from_actual_ers_costs(self):
+        data = self.build()
+        ordered = sorted(data["tasks"], key=lambda task: task["ers"])
+        self.assertIn("rank_s", ordered[0])
+        self.assertEqual([task["ers"] for task in ordered], list(range(len(ordered))))
+        self.assertEqual([task["rank_s"] for task in ordered],
+                         sorted((task["rank_s"] for task in ordered), reverse=True))
+        by_id = {task["id"]: task for task in ordered}
+        for task in ordered:
+            tail = max((cost + by_id[f'{task["dag"]}-t{child}']["rank_s"]
+                        for child, cost in task["average_edge_comm_s"].items()), default=0.)
+            self.assertAlmostEqual(task["rank_s"], task["average_compute_s"] + tail)
+
     def test_overload_does_not_report_planned_completion_as_actual_completion(self):
         data = self.build(load_scale=10.0)
         deadline = data["meta"]["deadline"]

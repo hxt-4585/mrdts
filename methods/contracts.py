@@ -8,6 +8,7 @@ import numpy as np
 from env.channel_queue import EntityRef
 from env.dag_generator import DAG
 from env.dag_runtime import DAGRuntime
+from env.task_runtime import TaskKey
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,24 @@ class PlacementDecision:
 
     execution_node: EntityRef
     ers_seq: int
+
+
+@dataclass(frozen=True)
+class DAGRequest:
+    """当前时隙待排序的 DAG；执行位置由后续卸载策略选择。"""
+
+    dag_id: int
+    dag: DAG
+    owner_member: EntityRef
+    ground_device: EntityRef
+
+    @property
+    def key(self) -> tuple[int, int, int]:
+        return self.owner_member.index, self.ground_device.index, self.dag_id
+
+    @property
+    def task_keys(self) -> tuple[TaskKey, ...]:
+        return tuple(TaskKey(*self.key, node) for node in range(self.dag.node_num))
 
 
 @dataclass(frozen=True)

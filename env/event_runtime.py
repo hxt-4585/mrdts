@@ -1,22 +1,23 @@
 """单个时隙内多 DAG 传输与计算的离散事件运行时。"""
 
 from collections import defaultdict
+from copy import copy
 from dataclasses import dataclass
 import heapq
 from itertools import count
-from typing import Mapping
+from typing import Iterable, Mapping
 
 import numpy as np
 
 from env.channel_model import ChannelModel, LinkType
 from env.channel_queue import DirectedChannelKey, DirectedChannelState, EntityKind, EntityRef, TransferJob
 from env.dag_generator import DAG
-from env.dag_runtime import DAGRuntime
+from env.dag_runtime import DAGRuntime, validate_dag
 from env.routing import RoutePlanner
 from env.server_queue import ServerState
 from env.slot_result import DAGResult, SlotResult
 from env.task_runtime import TaskKey, TaskRuntime, TaskStatus, TransferRecord
-from methods.contracts import PlacementDecision
+from methods.contracts import DAGRequest, PlacementDecision
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,16 @@ class _TransferBinding:
     next_transfer_id: str | None = None
     predecessor: TaskKey | None = None
     is_input: bool = False
+
+
+@dataclass
+class _PreparedDAG:
+    key: tuple[int, int, int]
+    tasks: dict[TaskKey, TaskRuntime]
+    runtime: DAGRuntime
+    pending: list[tuple[DirectedChannelKey, TransferJob, _TransferBinding]]
+    outgoing: dict[TaskKey, list[str]]
+    local_successors: dict[TaskKey, list[TaskKey]]
 
 
 class SchedulingRuntime:
@@ -135,62 +146,117 @@ class SchedulingRuntime:
         placements: Mapping[int, PlacementDecision],
         epoch_start: float,
     ) -> tuple[TaskKey, ...]:
+        """单 DAG 便捷入口；统一多 DAG 排序请使用 submit_dags。"""
+        self._require_open()
+        if set(placements) != set(range(dag.node_num)):
+            raise ValueError("每个子任务必须恰有一个 placement")
+        request = DAGRequest(dag_id, dag, owner_member, ground_device)
+        return self.submit_dags(
+            [request], {key: placements[key.node_id] for key in request.task_keys}, epoch_start)
+
+    def submit_dags(
+        self,
+        requests: Iterable[DAGRequest],
+        placements: Mapping[TaskKey, PlacementDecision],
+        epoch_start: float,
+    ) -> tuple[TaskKey, ...]:
+        """整批准备成功后统一入队和启动，保留跨 DAG 的相对 ERS 顺序。
+
+        本批序号压缩为连续编号并追加在已提交批次之后；已经启动的任务
+        不参与重新排序。一个 Member 的同批 DAG 应先一起调用 ERS.plan。
+        """
         self._require_open()
         epoch_start = float(epoch_start)
         if not np.isfinite(epoch_start) or not self.slot_start <= epoch_start < self.deadline:
             raise ValueError("DAG 提交时刻必须位于当前时隙窗口内")
         if epoch_start != self.now:
             raise ValueError("DAG 提交时刻必须等于当前运行时刻；请先推进到提交时刻")
-        if owner_member.kind is not EntityKind.MEMBER_UAV:
-            raise ValueError("owner_member 必须是 Member UAV")
-        if ground_device.kind is not EntityKind.GROUND_DEVICE:
-            raise ValueError("ground_device 必须是地面设备")
-        if set(placements) != set(range(dag.node_num)):
+        requests = tuple(requests)
+        if len({request.key for request in requests}) != len(requests):
+            raise ValueError("同一 owner/user/dag_id 的 DAG 重复")
+        for request in requests:
+            validate_dag(request.dag)
+            if request.key in self.dag_runtimes:
+                raise ValueError("同一 owner/user/dag_id 的 DAG 已提交")
+        required = {key for request in requests for key in request.task_keys}
+        if set(placements) != required:
             raise ValueError("每个子任务必须恰有一个 placement")
-        if (owner_member.index, ground_device.index, dag_id) in self.dag_runtimes:
-            raise ValueError("同一 owner/user/dag_id 的 DAG 已提交")
-        self._validate_submission_topology(owner_member, ground_device, placements)
+        sequences = [decision.ers_seq for decision in placements.values()]
+        if any(isinstance(seq, bool) or not isinstance(seq, int) or seq < 0 for seq in sequences):
+            raise ValueError("ers_seq 必须为非负整数")
+        if len(set(sequences)) != len(sequences):
+            raise ValueError("同一批次的 ers_seq 不能重复")
+        for request in requests:
+            decisions = {key.node_id: placements[key] for key in request.task_keys}
+            self._validate_submission_topology(request.owner_member, request.ground_device, decisions)
+            for parent, child in request.dag.edges:
+                if decisions[parent].ers_seq >= decisions[child].ers_seq:
+                    raise ValueError("ERS 顺序必须使前驱先于后继，避免信道队首阻塞死锁")
+        order = sorted(placements, key=lambda key: placements[key].ers_seq)
+        global_ers = {key: self._next_ers_seq + i for i, key in enumerate(order)}
+        # 预备阶段仅修改局部状态，连传输 ID 计数也在成功后才提交。
+        transfer_counter = copy(self._transfer_counter)
+        prepared = [self._prepare_dag(request, placements, global_ers, epoch_start, transfer_counter)
+                    for request in sorted(requests, key=lambda item: item.key)]
+        pending = [item for dag in prepared for item in dag.pending]
+        for dag in prepared:
+            self.tasks.update(dag.tasks)
+            self.dag_runtimes[dag.key] = dag.runtime
+            for key, transfers in dag.outgoing.items():
+                self._outgoing_transfers[key].extend(transfers)
+            for key, children in dag.local_successors.items():
+                self._local_successors[key].extend(children)
+            self._ready_for_server.update(key for key, task in dag.tasks.items() if task.data_ready_at is not None)
+        for key, job, binding in sorted(pending, key=lambda item: (
+            item[0].source, item[0].target, item[1].ers_seq, item[1].transfer_id
+        )):
+            state = self.channels.setdefault(key, DirectedChannelState(key))
+            state.enqueue(job)
+            self._transfer_channel[job.transfer_id] = key
+            self._transfer_bindings[job.transfer_id] = binding
+        self._next_ers_seq += len(order)
+        self._transfer_counter = transfer_counter
+        self._dispatch(self.now)
+        return tuple(key for dag in prepared for key in dag.tasks)
 
-        self.now = float(epoch_start)
-        ordered_nodes = sorted(placements, key=lambda node: (placements[node].ers_seq, node))
-        global_ers = {node: self._next_ers_seq + index for index, node in enumerate(ordered_nodes)}
-        self._next_ers_seq += dag.node_num
+    def _prepare_dag(
+        self, request: DAGRequest, placements: Mapping[TaskKey, PlacementDecision],
+        global_ers: Mapping[TaskKey, int], epoch_start: float, transfer_counter: count,
+    ) -> _PreparedDAG:
+        dag, ground_device, owner_member = request.dag, request.ground_device, request.owner_member
+        prepared = _PreparedDAG(request.key, {}, DAGRuntime(dag), [], defaultdict(list), defaultdict(list))
         predecessors = {node: set() for node in range(dag.node_num)}
         for parent, child in dag.edges:
             predecessors[child].add(parent)
-        keys = tuple(TaskKey(owner_member.index, ground_device.index, dag_id, node) for node in range(dag.node_num))
-        node_keys = {key.node_id: key for key in keys}
+        node_keys = {key.node_id: key for key in request.task_keys}
         for node, key in node_keys.items():
-            decision = placements[node]
+            decision = placements[key]
             if decision.execution_node not in self.servers:
                 raise ValueError(f"执行节点 {decision.execution_node} 没有计算服务器")
-            self.tasks[key] = TaskRuntime(
+            prepared.tasks[key] = TaskRuntime(
                 key=key,
                 execution_node=decision.execution_node,
-                ers_seq=global_ers[node],
+                ers_seq=global_ers[key],
                 cpu_cycles=float(dag.node_features[node, 1]),
                 input_bits=float(dag.node_features[node, 0]) * 8.0 * 1024.0,
                 predecessors={node_keys[parent] for parent in predecessors[node]},
             )
-        self.dag_runtimes[(owner_member.index, ground_device.index, dag_id)] = DAGRuntime(dag)
-
-        pending: list[tuple[DirectedChannelKey, TransferJob, _TransferBinding]] = []
         for node, key in node_keys.items():
-            task = self.tasks[key]
+            task = prepared.tasks[key]
             route = self.route_planner.input_route(ground_device, owner_member, task.execution_node)
-            if not route.hops:
+            if not route.hops or task.input_bits == 0:
                 task.input_record = TransferRecord(
                     (), start_at=float(epoch_start), finish_at=float(epoch_start)
                 )
-                if task.mark_input_arrived(epoch_start):
-                    self._ready_for_server.add(task.key)
+                task.mark_input_arrived(epoch_start)
             else:
                 task.input_record = self._append_route(
-                    pending, route.hops, task, task.input_bits, epoch_start, is_input=True
+                    prepared.pending, route.hops, task, task.input_bits, epoch_start,
+                    transfer_counter, is_input=True
                 )
         for parent, child in dag.edges:
-            parent_task = self.tasks[node_keys[parent]]
-            child_task = self.tasks[node_keys[child]]
+            parent_task = prepared.tasks[node_keys[parent]]
+            child_task = prepared.tasks[node_keys[child]]
             result_bits = float(dag.edge_features[(parent, child)]) * 8.0 * 1024.0
             route = self.route_planner.predecessor_route(
                 parent_task.execution_node,
@@ -198,24 +264,18 @@ class SchedulingRuntime:
                 ground_device,
                 owner_member,
             )
-            if not route.hops:
+            if not route.hops or result_bits == 0:
                 record = TransferRecord(())
                 child_task.predecessor_records[parent_task.key] = record
-                self._local_successors[parent_task.key].append(child_task.key)
+                prepared.local_successors[parent_task.key].append(child_task.key)
             else:
                 record = self._append_route(
-                    pending, route.hops, child_task, result_bits, None, predecessor=parent_task.key
+                    prepared.pending, route.hops, child_task, result_bits, None,
+                    transfer_counter, predecessor=parent_task.key
                 )
                 child_task.predecessor_records[parent_task.key] = record
-                self._outgoing_transfers[parent_task.key].append(record.transfer_ids[0])
-
-        for key, job, binding in sorted(pending, key=lambda item: (item[0].source, item[0].target, item[1].ers_seq, item[1].transfer_id)):
-            state = self.channels.setdefault(key, DirectedChannelState(key))
-            state.enqueue(job)
-            self._transfer_channel[job.transfer_id] = key
-            self._transfer_bindings[job.transfer_id] = binding
-        self._dispatch(self.now)
-        return keys
+                prepared.outgoing[parent_task.key].append(record.transfer_ids[0])
+        return prepared
 
     def advance_until(self, absolute_time: float) -> None:
         self._require_open()
@@ -349,10 +409,11 @@ class SchedulingRuntime:
         task: TaskRuntime,
         payload_bits: float,
         source_ready_at: float | None,
+        transfer_counter: count,
         is_input: bool = False,
         predecessor: TaskKey | None = None,
     ) -> TransferRecord:
-        transfer_ids = tuple(f"tx-{next(self._transfer_counter)}" for _ in hops)
+        transfer_ids = tuple(f"tx-{next(transfer_counter)}" for _ in hops)
         record = TransferRecord(transfer_ids)
         for index, hop in enumerate(hops):
             transfer_id = transfer_ids[index]
@@ -360,7 +421,7 @@ class SchedulingRuntime:
                 transfer_id=transfer_id,
                 ers_seq=task.ers_seq,
                 source_ready_at=source_ready_at if index == 0 else None,
-                duration_s=self._duration_s(hop, payload_bits),
+                duration_s=self.transfer_duration_s(hop, payload_bits),
             )
             pending.append(
                 (
@@ -378,7 +439,11 @@ class SchedulingRuntime:
             )
         return record
 
-    def _duration_s(self, hop: DirectedChannelKey, payload_bits: float) -> float:
+    def transfer_duration_s(self, hop: DirectedChannelKey, payload_bits: float) -> float:
+        """当前物理快照上的单跳时延，不含排队；排序和实际执行共用。"""
+        self._require_open()
+        if not np.isfinite(payload_bits) or payload_bits < 0:
+            raise ValueError("传输数据量必须为有限非负数")
         transmitter = self.entity_positions[hop.source]
         receiver = self.entity_positions[hop.target]
         power = self.transmit_powers[hop.source]
@@ -388,24 +453,37 @@ class SchedulingRuntime:
         )
         return float(payload_bits) / metrics.rate_bps
 
+    def candidate_execution_nodes(
+        self, owner_member: EntityRef, ground_device: EntityRef,
+    ) -> tuple[EntityRef, ...]:
+        """自身 Ground、当前同区域 Member 和唯一 BS，供排序与动作选择。"""
+        self._require_open()
+        if self.member_regions is None or self.ground_owner_members is None:
+            raise RuntimeError("提交 DAG 前必须提供当前时隙拓扑")
+        if owner_member.kind is not EntityKind.MEMBER_UAV or owner_member not in self.member_regions:
+            raise ValueError("owner_member 必须是已登记的 Member UAV")
+        if ground_device.kind is not EntityKind.GROUND_DEVICE or ground_device not in self.ground_owner_members:
+            raise ValueError("ground_device 必须是已登记的地面设备")
+        if self.ground_owner_members[ground_device] != owner_member:
+            raise ValueError("地面设备当前关联的 Member UAV 与 owner_member 不一致")
+        region = self.member_regions[owner_member]
+        members = sorted(member for member, region_id in self.member_regions.items() if region_id == region)
+        return (ground_device, *members, self.global_bs)
+
     def _validate_submission_topology(
         self,
         owner_member: EntityRef,
         ground_device: EntityRef,
         placements: Mapping[int, PlacementDecision],
     ) -> None:
-        if self.member_regions is None or self.ground_owner_members is None:
-            raise RuntimeError("提交 DAG 前必须提供当前时隙拓扑")
-        if self.ground_owner_members[ground_device] != owner_member:
-            raise ValueError("地面设备当前关联的 Member UAV 与 owner_member 不一致")
-        owner_region_id = self.member_regions[owner_member]
+        candidates = self.candidate_execution_nodes(owner_member, ground_device)
         for decision in placements.values():
             execution_node = decision.execution_node
             if execution_node.kind is EntityKind.GROUND_DEVICE:
                 if execution_node != ground_device:
                     raise ValueError("子任务只能在自身地面设备本地执行")
             elif execution_node.kind is EntityKind.MEMBER_UAV:
-                if self.member_regions.get(execution_node) != owner_region_id:
+                if execution_node not in candidates:
                     raise ValueError("Member UAV 执行节点必须与任务 owner 位于同一区域")
             elif execution_node.kind is EntityKind.BS:
                 if execution_node != self.global_bs:

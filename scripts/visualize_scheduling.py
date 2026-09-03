@@ -23,7 +23,8 @@ from env.region import Region
 from env.settings import UAVConfig, UserConfig
 from env.uav import MasterUAV, MemberUAV
 from env.user import User
-from methods.contracts import PlacementDecision
+from methods.contracts import DAGRequest, PlacementDecision
+from methods.ers import ERS
 
 
 def entity_id(entity):
@@ -64,7 +65,7 @@ def make_scene():
 
 
 def build_replay(load_scale=1.0, initial_region=1):
-    """执行真实的 begin_slot → submit_dag → end_slot，返回可序列化回放记录。"""
+    """执行 begin_slot → ERS.plan → submit_dags → end_slot，提取真实回放记录。"""
     if not math.isfinite(load_scale) or load_scale <= 0:
         raise ValueError("load_scale 必须是有限正数")
     region, users, members = make_scene()
@@ -90,6 +91,7 @@ def build_replay(load_scale=1.0, initial_region=1):
                              frequencies_hz=list(runtime.servers[entity].core_frequencies)))
 
     dag_definitions = []
+    requests, execution_nodes = [], {}
     for user_index, region_id in enumerate(users.region_ids):
         owner_id = int(environment.user_member_ids[user_index])
         owner = EntityRef(EntityKind.MEMBER_UAV, owner_id)
@@ -100,13 +102,17 @@ def build_replay(load_scale=1.0, initial_region=1):
         # 演示专用确定性负载：较长的计算段便于阅读；不覆盖 config/dag.toml。
         dag = DAG(4, edges, np.array([[120, 8e8], [70, 9e7], [100, 16e8], [80, 18e8]]) * load_scale,
                   {edge: size * load_scale for edge, size in zip(edges, (35, 60, 40, 55))})
-        runtime.submit_dag(user_index, dag, owner, ground,
-                           {node: PlacementDecision(location, node) for node, location in enumerate(locations)},
-                           runtime.slot_start)
+        request = DAGRequest(user_index, dag, owner, ground)
+        requests.append(request)
+        execution_nodes.update({key: locations[key.node_id] for key in request.task_keys})
         dag_definitions.append(dict(id=f"d{user_index}", label=f"DAG {user_index}",
                                     region=int(region_id), ground=entity_id(ground), owner=entity_id(owner),
                                     peer=f"m{peer_id}", edges=[dict(source=f"d{user_index}-t{a}",
                                     target=f"d{user_index}-t{b}", kb=dag.edge_features[(a, b)]) for a, b in edges]))
+
+    plan = ERS(runtime).plan(requests)
+    runtime.submit_dags(requests, {key: PlacementDecision(execution_nodes[key], seq)
+                                  for seq, key in enumerate(plan.order)}, runtime.slot_start)
 
     # 只读公开队列。作业出队后仍保留引用，关闭时无需读取已清理的运行时内部状态。
     jobs = {}
@@ -125,8 +131,12 @@ def build_replay(load_scale=1.0, initial_region=1):
         region_id = int(users.region_ids[key.user_id])
         tid = task_id(key)
         label = f"D{key.dag_id} / T{key.node_id}"
+        costs = plan.costs[key.owner_member_id, key.user_id, key.dag_id]
         tasks.append(dict(id=tid, label=label, node=key.node_id, dag=f"d{key.dag_id}", region=region_id,
                           execution=entity_id(task.execution_node), ers=task.ers_seq,
+                          rank_s=plan.ranks[key], average_compute_s=costs.average_compute_s[key.node_id],
+                          average_edge_comm_s={str(child): value for (parent, child), value
+                                               in costs.average_edge_comm_s.items() if parent == key.node_id},
                           input_kb=task.input_bits / 8192, cycles=task.cpu_cycles,
                           predecessors=[task_id(k) for k in sorted(task.predecessors)],
                           input_arrival=task.input_arrival_at, ready=task.data_ready_at,
