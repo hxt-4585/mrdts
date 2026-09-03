@@ -6,7 +6,9 @@ specs/02_scenario_parameters.md 第 1 节定义的区域划分规则：
 - 全局区域由 grid_size × grid_size 个基础网格组成；
 - 区域地图采用离散加权质心 Voronoi（CVT）方式生成；
 - 每个区域满足：四邻接连通、互不重叠、面积不低于下限，且全覆盖整个区域；
-- 默认各区域面积尽量接近，并避免细长通道和随机尖刺。
+- 区域面积由 ``area_imbalance`` 与 ``min_area_ratio`` 控制；当前默认配置使用
+  ``area_imbalance=0.5`` 的不均衡面积场景，只有设为 ``0`` 时才趋近等面积，
+  并避免细长通道和随机尖刺。
 """
 
 import numpy as np
