@@ -200,18 +200,26 @@ class MemberUAV(UAV):
         return ~in_bounds
 
     @staticmethod
-    def _select_user_positions_near_master(user_positions, master_position, count):
-        """选择距离本区域 Master 最近的用户位置作为初始 Member 位置。"""
-        squared_distances = ((user_positions - master_position) ** 2).sum(axis=1)
-        ordered_indices = np.argsort(squared_distances)
-        selected_indices = ordered_indices[np.arange(count) % len(ordered_indices)]
-        return user_positions[selected_indices]
+    def _select_positions_near_master(region, region_id, master_position, count):
+        """选择 Master 周围本区域的不同网格中心，水平间距至少一格。
+
+        距 Master 至少保留一格距离，避免相同高度时与 Master 重合。
+        相同距离按网格顺序稳定选择；空间不足时拒绝复用已有位置。
+        """
+        cells = np.argwhere(region.region_map == region_id)
+        positions = (cells[:, ::-1] + 0.5) * region.config.cell_size
+        squared_distances = ((positions - master_position) ** 2).sum(axis=1)
+        available = np.flatnonzero(squared_distances >= region.config.cell_size**2)
+        if len(available) < count:
+            raise ValueError(f"区域 {region_id} 的可用网格不足，无法保持 Member 初始间距")
+        ordered = available[np.argsort(squared_distances[available], kind="stable")]
+        return positions[ordered[:count]]
 
     def generate_from_region_and_user(self, region, users, masters):
-        """按区域用户数生成 Member，并在每个 Master 附近初始化位置。"""
+        """按区域用户数分配数量，位置只由本区域网格和 Master 决定。"""
         if region.region_map is None:
             raise RuntimeError("区域地图尚未生成，请先调用 Region.generate()")
-        if users.positions is None or users.region_ids is None:
+        if users.region_ids is None:
             raise RuntimeError("用户尚未生成，请先调用 User.generate_from_region()")
         if masters.positions is None or masters.region_ids is None:
             raise RuntimeError("Master UAV 尚未生成，请先调用 MasterUAV.generate_from_region()")
@@ -225,14 +233,11 @@ class MemberUAV(UAV):
         start = 0
         for region_index, count in enumerate(member_counts):
             end = start + int(count)
-            user_positions = users.positions[users.region_ids == region_index + 1, :2]
-            if len(user_positions) == 0:
-                raise RuntimeError("存在没有地面用户的区域，无法按用户位置初始化 Member UAV")
             master_positions = masters.positions[masters.region_ids == region_index + 1, :2]
             if len(master_positions) != 1:
                 raise ValueError("每个区域必须恰有一架 Master UAV")
-            positions[start:end, :2] = self._select_user_positions_near_master(
-                user_positions, master_positions[0], int(count)
+            positions[start:end, :2] = self._select_positions_near_master(
+                region, region_index + 1, master_positions[0], int(count)
             )
             positions[start:end, 2] = self.config.member_altitude
             region_ids[start:end] = region_index + 1

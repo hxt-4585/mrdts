@@ -1,12 +1,14 @@
 """UAV 集合基础状态测试。"""
 
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
 from env.region import Region
 from env.uav import MasterUAV, MemberUAV, UAV
 from env.user import User
+from env.settings import UAVConfig, UserConfig
 
 
 class TestUAV(unittest.TestCase):
@@ -100,8 +102,8 @@ class TestMemberUAV(unittest.TestCase):
         members.generate_from_region_and_user(region, users, masters)
         return members
 
-    def test_generates_configured_members_at_user_positions_in_their_regions(self):
-        """Member 应按用户分布初始化，并保持正确的区域归属和高度。"""
+    def test_generates_separated_members_near_masters_in_their_regions(self):
+        """Member 应位于本区域 Master 附近，且水平间距至少一格。"""
         region = Region()
         region.generate()
         users = User()
@@ -121,8 +123,15 @@ class TestMemberUAV(unittest.TestCase):
             members.positions[: members.bs_index], members.region_ids[: members.bs_index]
         ):
             self.assertEqual(region.get_region_id(position[0], position[1]), region_id)
-            user_positions = users.positions[users.region_ids == region_id, :2]
-            self.assertTrue(np.any(np.all(user_positions == position[:2], axis=1)))
+            master_position = masters.positions[masters.region_ids == region_id, :2][0]
+            self.assertGreaterEqual(np.linalg.norm(position[:2] - master_position), region.config.cell_size)
+        for region_id, count in enumerate(members.region_member_counts, start=1):
+            xy = members.positions[members.region_ids == region_id, :2]
+            master_xy = masters.positions[masters.region_ids == region_id, :2][0]
+            # 默认场景的 Master 周围空间充分，全部 Member 都应处在近邻网格内。
+            self.assertTrue((np.linalg.norm(xy - master_xy, axis=1) <= 2 * region.config.cell_size).all())
+            distances = np.linalg.norm(xy[:, None, :] - xy[None, :, :], axis=2)
+            self.assertTrue((distances[np.triu_indices(int(count), 1)] >= region.config.cell_size).all())
 
     def test_appends_bs_at_center_with_zero_region_id_and_configured_cores(self):
         """最后一行应为固定在区域中心的 BS，并拥有独立的计算资源。"""
@@ -156,8 +165,8 @@ class TestMemberUAV(unittest.TestCase):
             members.core_frequencies[members.bs_index], np.full(4, 12e9)
         )
 
-    def test_selects_the_closest_users_to_each_master_for_initial_positions(self):
-        """每个区域的初始 Member 应选取离本区域 Master 最近的用户位置。"""
+    def test_initial_positions_do_not_depend_on_user_coordinates(self):
+        """用户坐标改变但区域人数不变时，Member 初始位置应完全一致。"""
         region = Region()
         region.generate()
         users = User()
@@ -168,13 +177,57 @@ class TestMemberUAV(unittest.TestCase):
 
         members.generate_from_region_and_user(region, users, masters)
 
-        for region_id, count in enumerate(members.region_member_counts, start=1):
-            user_positions = users.positions[users.region_ids == region_id, :2]
-            master_position = masters.positions[masters.region_ids == region_id, :2][0]
-            expected = np.sort(((user_positions - master_position) ** 2).sum(axis=1))[:count]
-            actual_positions = members.positions[members.region_ids == region_id, :2]
-            actual = np.sort(((actual_positions - master_position) ** 2).sum(axis=1))
-            np.testing.assert_allclose(actual, expected)
+        original = members.positions.copy()
+        for region_id in masters.region_ids:
+            cells = np.argwhere(region.region_map == region_id)
+            xy = (cells[:, ::-1] + .5) * region.config.cell_size
+            master_xy = masters.positions[masters.region_ids == region_id, :2][0]
+            farthest = xy[np.argmax(np.sum((xy - master_xy) ** 2, axis=1))]
+            users.positions[users.region_ids == region_id, :2] = farthest
+        members.generate_from_region_and_user(region, users, masters)
+        np.testing.assert_array_equal(members.positions, original)
+
+    def test_one_user_three_members_can_run_ers_after_zero_flight(self):
+        """回归：每区域 1 用户、3 Member 不重合，ERS 后可正常本地执行。"""
+        from env.channel_model import ChannelModel
+        from env.channel_queue import EntityKind, EntityRef
+        from env.dag_generator import DAG
+        from env.environment import Environment
+        from methods.contracts import DAGRequest, PlacementDecision
+        from methods.ers import ERS
+
+        region = Region()
+        region.generate()
+        count = region.config.region_count
+        users = User(replace(UserConfig.default(), total_users=count, min_users_per_region=1,
+                             area_fluctuation=0.))
+        users.generate_from_region(region)
+        config = replace(UAVConfig.default(), master_uav_count=count,
+                         member_uav_count=3 * count, min_members_per_region=3)
+        masters = MasterUAV(config)
+        masters.generate_from_region(region)
+        members = MemberUAV(config)
+        members.generate_from_region_and_user(region, users, masters)
+        xy = members.positions[:members.bs_index, :2]
+        distances = np.linalg.norm(xy[:, None, :] - xy[None, :, :], axis=2)
+        self.assertGreaterEqual(distances[np.triu_indices(len(xy), 1)].min(), region.config.cell_size)
+
+        environment = Environment(members, ChannelModel(), users.config.transmit_power,
+                                  users.config.core_frequency)
+        environment.begin_slot(region, users.positions, np.zeros((members.member_uav_count, 2)))
+        runtime = environment.runtime
+        requests = [DAGRequest(
+            0, DAG(2, [(0, 1)], np.array([[1., 1e7], [1., 1e7]]), {(0, 1): 1.}),
+            EntityRef(EntityKind.MEMBER_UAV, int(environment.user_member_ids[user_id])),
+            EntityRef(EntityKind.GROUND_DEVICE, user_id)) for user_id in range(count)]
+        plan = ERS(runtime).plan(requests)
+        runtime.submit_dags(requests, {
+            key: PlacementDecision(EntityRef(EntityKind.GROUND_DEVICE, key.user_id), seq)
+            for seq, key in enumerate(plan.order)
+        }, runtime.now)
+        result = environment.end_slot()
+        self.assertEqual(len(result.finished_dags), count)
+        self.assertFalse(result.failed_dags)
 
     def test_applies_horizontal_velocity_for_configured_flight_duration(self):
         """Member 应将归一化动作缩放为最大速度后更新水平位置。"""
