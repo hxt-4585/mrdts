@@ -2,8 +2,8 @@
 
 import unittest
 
-from env.channel_queue import DirectedChannelKey, EntityKind, EntityRef
-from env.routing import RoutePlanner
+from env.communication.routing import RoutePlanner
+from env.types import DirectedChannelKey, EntityKind, EntityRef
 
 
 class TestRoutePlanner(unittest.TestCase):

@@ -2,6 +2,8 @@
 
 本目录记录 MRDTS（Multi-Region Distributed Task Scheduling）强化学习环境的建模假设、参数设置与后续实现方案。
 
+代码目录与导入迁移说明见 [环境代码结构](../env/README.md)。现有仿真入口为 `env.simulator.Simulator`，Gym 风格交互接口尚未实现。
+
 ## 文档列表
 
 | 编号 | 文件                             | 内容                                         | 状态   |

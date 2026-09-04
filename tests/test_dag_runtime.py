@@ -8,8 +8,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from env.dag_generator import DAG
-from env.dag_runtime import DAGRuntime
+from env.runtime.dag_runtime import DAGRuntime
+from env.workload.dag_generator import DAG
 
 
 def make_diamond_dag():

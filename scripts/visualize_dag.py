@@ -22,7 +22,7 @@ import networkx as nx
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from env.settings import DAGConfig
-from env.dag_generator import DAGGenerator
+from env.workload.dag_generator import DAGGenerator
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 

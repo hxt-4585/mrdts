@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from env.region import Region
-from env.user import User
+from env.entities.region import Region
+from env.entities.user import User
 from scripts.visualize_user import draw_user_distribution
 
 

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from env.channel_queue import DirectedChannelKey, EntityKind, EntityRef
+from env.types import DirectedChannelKey, EntityKind, EntityRef
 
 
 @dataclass(frozen=True)

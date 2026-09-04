@@ -8,14 +8,13 @@ from typing import TYPE_CHECKING, Iterable, Mapping
 
 import numpy as np
 
-from env.channel_queue import DirectedChannelKey, EntityRef
-from env.dag_generator import DAG
-from env.dag_runtime import topological_order, validate_dag
-from env.task_runtime import TaskKey
-from methods.contracts import DAGRequest
+from env.contracts import DAGRequest
+from env.runtime.dag_runtime import topological_order, validate_dag
+from env.types import DirectedChannelKey, EntityRef, TaskKey
+from env.workload.dag_generator import DAG
 
 if TYPE_CHECKING:
-    from env.event_runtime import SchedulingRuntime
+    from env.runtime.event_runtime import SchedulingRuntime
 
 
 @dataclass(frozen=True)

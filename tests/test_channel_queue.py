@@ -2,13 +2,8 @@
 
 import unittest
 
-from env.channel_queue import (
-    DirectedChannelKey,
-    DirectedChannelState,
-    EntityKind,
-    EntityRef,
-    TransferJob,
-)
+from env.runtime.channel_queue import DirectedChannelState, TransferJob
+from env.types import DirectedChannelKey, EntityKind, EntityRef
 
 
 class TestDirectedChannelState(unittest.TestCase):

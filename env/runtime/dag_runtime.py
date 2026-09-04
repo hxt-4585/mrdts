@@ -10,7 +10,7 @@ from numbers import Integral
 
 import numpy as np
 
-from env.dag_generator import DAG
+from env.workload.dag_generator import DAG
 
 
 def topological_order(dag: DAG) -> tuple[int, ...]:

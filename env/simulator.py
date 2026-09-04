@@ -2,13 +2,13 @@
 
 import numpy as np
 
-from env.channel_model import ChannelModel
+from env.communication.channel_model import ChannelModel
+from env.entities.uav import MemberUAV
+from env.runtime.slot_result import SlotResult
 from env.settings import SchedulingConfig
-from env.slot_result import SlotResult
-from env.uav import MemberUAV
 
 
-class Environment:
+class Simulator:
     """协调现有 UAV 计算资源与信道模型的最小环境内核。
 
     本类通过 begin_slot/end_slot 管理飞行、拓扑和当期运行时的生命周期。
@@ -111,8 +111,8 @@ class Environment:
         """创建绑定单个窗口的运行时；连续时隙应使用 begin_slot/end_slot。"""
         if self._runtime is not None:
             raise RuntimeError("当前时隙尚未结束，不能创建替代运行时")
-        from env.channel_queue import EntityKind, EntityRef
-        from env.event_runtime import SchedulingRuntime, ServerSpec
+        from env.types import EntityKind, EntityRef
+        from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 
         user_positions = np.asarray(user_positions, dtype=float)
         user_member_ids = np.asarray(user_member_ids, dtype=int)

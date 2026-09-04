@@ -5,9 +5,9 @@ from dataclasses import replace
 
 import numpy as np
 
-from env.region import Region
-from env.uav import MasterUAV, MemberUAV, UAV
-from env.user import User
+from env.entities.region import Region
+from env.entities.uav import MasterUAV, MemberUAV, UAV
+from env.entities.user import User
 from env.settings import UAVConfig, UserConfig
 
 
@@ -189,11 +189,11 @@ class TestMemberUAV(unittest.TestCase):
 
     def test_one_user_three_members_can_run_ers_after_zero_flight(self):
         """回归：每区域 1 用户、3 Member 不重合，ERS 后可正常本地执行。"""
-        from env.channel_model import ChannelModel
-        from env.channel_queue import EntityKind, EntityRef
-        from env.dag_generator import DAG
-        from env.environment import Environment
-        from methods.contracts import DAGRequest, PlacementDecision
+        from env.communication.channel_model import ChannelModel
+        from env.types import EntityKind, EntityRef
+        from env.workload.dag_generator import DAG
+        from env.simulator import Simulator
+        from env.contracts import DAGRequest, PlacementDecision
         from methods.ers import ERS
 
         region = Region()
@@ -212,7 +212,7 @@ class TestMemberUAV(unittest.TestCase):
         distances = np.linalg.norm(xy[:, None, :] - xy[None, :, :], axis=2)
         self.assertGreaterEqual(distances[np.triu_indices(len(xy), 1)].min(), region.config.cell_size)
 
-        environment = Environment(members, ChannelModel(), users.config.transmit_power,
+        environment = Simulator(members, ChannelModel(), users.config.transmit_power,
                                   users.config.core_frequency)
         environment.begin_slot(region, users.positions, np.zeros((members.member_uav_count, 2)))
         runtime = environment.runtime

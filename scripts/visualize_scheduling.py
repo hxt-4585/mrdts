@@ -15,15 +15,16 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from env.channel_model import ChannelModel
-from env.channel_queue import EntityKind, EntityRef, TransferStatus
-from env.dag_generator import DAG
-from env.environment import Environment
-from env.region import Region
+from env.communication.channel_model import ChannelModel
+from env.contracts import DAGRequest, PlacementDecision
+from env.entities.region import Region
+from env.entities.uav import MasterUAV, MemberUAV
+from env.entities.user import User
+from env.runtime.channel_queue import TransferStatus
 from env.settings import UAVConfig, UserConfig
-from env.uav import MasterUAV, MemberUAV
-from env.user import User
-from methods.contracts import DAGRequest, PlacementDecision
+from env.simulator import Simulator
+from env.types import EntityKind, EntityRef
+from env.workload.dag_generator import DAG
 from methods.ers import ERS
 
 
@@ -71,7 +72,7 @@ def build_replay(load_scale=1.0, initial_region=1):
     region, users, members = make_scene()
     if not 1 <= initial_region <= region.config.region_count:
         raise ValueError(f"region 必须位于 1..{region.config.region_count}")
-    environment = Environment(members, ChannelModel(), users.config.transmit_power,
+    environment = Simulator(members, ChannelModel(), users.config.transmit_power,
                               users.config.core_frequency)
     violations = environment.begin_slot(region, users.positions,
                                          np.zeros((members.member_uav_count, 2)))

@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from env.channel_model import ChannelModel, LinkType
+from env.communication.channel_model import ChannelModel, LinkType
 from env.settings import ChannelConfig
 
 

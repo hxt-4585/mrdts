@@ -4,11 +4,11 @@ import unittest
 
 import numpy as np
 
-from env.channel_model import ChannelModel
-from env.channel_queue import DirectedChannelKey, EntityKind, EntityRef
-from env.dag_generator import DAG
-from env.event_runtime import SchedulingRuntime, ServerSpec
-from methods.contracts import PlacementDecision
+from env.communication.channel_model import ChannelModel
+from env.contracts import PlacementDecision
+from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
+from env.types import DirectedChannelKey, EntityKind, EntityRef
+from env.workload.dag_generator import DAG
 
 
 class TestSchedulingRuntime(unittest.TestCase):

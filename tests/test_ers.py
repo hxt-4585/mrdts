@@ -4,12 +4,11 @@ import unittest
 
 import numpy as np
 
-from env.dag_generator import DAG
-from env.channel_model import ChannelModel
-from env.channel_queue import DirectedChannelKey, EntityKind, EntityRef
-from env.event_runtime import SchedulingRuntime, ServerSpec
-from env.task_runtime import TaskKey
-from methods.contracts import DAGRequest
+from env.communication.channel_model import ChannelModel
+from env.contracts import DAGRequest
+from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
+from env.types import DirectedChannelKey, EntityKind, EntityRef, TaskKey
+from env.workload.dag_generator import DAG
 from methods.ers import ERS
 
 

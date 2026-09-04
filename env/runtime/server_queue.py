@@ -3,8 +3,7 @@
 from collections import deque
 from dataclasses import dataclass, field
 
-from env.channel_queue import EntityRef
-from env.task_runtime import TaskKey
+from env.types import EntityRef, TaskKey
 
 
 @dataclass(frozen=True)

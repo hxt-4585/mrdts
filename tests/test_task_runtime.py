@@ -2,8 +2,8 @@
 
 import unittest
 
-from env.channel_queue import EntityKind, EntityRef
-from env.task_runtime import TaskKey, TaskRuntime, TaskStatus
+from env.runtime.task_runtime import TaskRuntime, TaskStatus
+from env.types import EntityKind, EntityRef, TaskKey
 
 
 class TestTaskRuntime(unittest.TestCase):

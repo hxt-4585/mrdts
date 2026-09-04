@@ -9,15 +9,16 @@ from typing import Iterable, Mapping
 
 import numpy as np
 
-from env.channel_model import ChannelModel, LinkType
-from env.channel_queue import DirectedChannelKey, DirectedChannelState, EntityKind, EntityRef, TransferJob
-from env.dag_generator import DAG
-from env.dag_runtime import DAGRuntime, validate_dag
-from env.routing import RoutePlanner
-from env.server_queue import ServerState
-from env.slot_result import DAGResult, SlotResult
-from env.task_runtime import TaskKey, TaskRuntime, TaskStatus, TransferRecord
-from methods.contracts import DAGRequest, PlacementDecision
+from env.communication.channel_model import ChannelModel, LinkType
+from env.communication.routing import RoutePlanner
+from env.contracts import DAGRequest, PlacementDecision
+from env.runtime.channel_queue import DirectedChannelState, TransferJob
+from env.runtime.dag_runtime import DAGRuntime, validate_dag
+from env.runtime.server_queue import ServerState
+from env.runtime.slot_result import DAGResult, SlotResult
+from env.runtime.task_runtime import TaskRuntime, TaskStatus, TransferRecord
+from env.types import DirectedChannelKey, EntityKind, EntityRef, TaskKey
+from env.workload.dag_generator import DAG
 
 
 @dataclass(frozen=True)

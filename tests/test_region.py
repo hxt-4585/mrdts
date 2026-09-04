@@ -16,8 +16,8 @@ import numpy as np
 # 将项目根目录加入 sys.path，便于导入 env 包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from env.entities.region import Region
 from env.settings import RegionConfig
-from env.region import Region
 
 
 class TestRegionGeneration(unittest.TestCase):

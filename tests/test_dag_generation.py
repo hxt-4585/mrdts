@@ -15,7 +15,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from env.settings import DAGConfig
-from env.dag_generator import DAGGenerator
+from env.workload.dag_generator import DAGGenerator
 
 
 class TestDAGGeneration(unittest.TestCase):

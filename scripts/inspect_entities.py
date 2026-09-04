@@ -12,9 +12,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from env.region import Region
-from env.uav import MasterUAV, MemberUAV
-from env.user import User
+from env.entities.region import Region
+from env.entities.uav import MasterUAV, MemberUAV
+from env.entities.user import User
 
 
 def _format_value(value):

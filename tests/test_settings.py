@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 
 from env.settings import ChannelConfig, DAGConfig, RegionConfig, UAVConfig, UserConfig
-from env.dag_generator import DAGGenerator
+from env.workload.dag_generator import DAGGenerator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

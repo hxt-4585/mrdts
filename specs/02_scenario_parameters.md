@@ -90,7 +90,7 @@ $$
 
 ### 1.4 初始区域划分方法
 
-初始区域地图采用离散加权质心 Voronoi（CVT）方法生成，对应 `env/region.py` 中的 `Region.generate()`：
+初始区域地图采用离散加权质心 Voronoi（CVT）方法生成，对应 `env/entities/region.py` 中的 `Region.generate()`：
 
 1. 使用独立随机种子选取第一个区域种子，再通过最远点采样选取其余种子，使初始位置尽量分散；
 2. 根据面积下限与 `area_imbalance` 计算各区域的目标网格数量；

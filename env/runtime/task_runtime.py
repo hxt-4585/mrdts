@@ -3,15 +3,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 
-from env.channel_queue import EntityRef
-
-
-@dataclass(frozen=True, order=True)
-class TaskKey:
-    owner_member_id: int
-    user_id: int
-    dag_id: int
-    node_id: int
+from env.types import EntityRef, TaskKey
 
 
 class TaskStatus(str, Enum):

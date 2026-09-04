@@ -4,9 +4,9 @@ import unittest
 
 import numpy as np
 
-from env.channel_queue import DirectedChannelKey
-from env.dag_generator import DAG
-from methods.contracts import DAGRequest, PlacementDecision
+from env.contracts import DAGRequest, PlacementDecision
+from env.types import DirectedChannelKey
+from env.workload.dag_generator import DAG
 from methods.ers import ERS
 from tests.test_ers import make_dag, make_runtime
 
@@ -80,7 +80,7 @@ class TestERSRuntime(unittest.TestCase):
                               second.task_keys[0]: PlacementDecision(member, 1),
                               second.task_keys[1]: PlacementDecision(bs, 2)}
                 if failure == "placement":
-                    from env.channel_queue import EntityKind, EntityRef
+                    from env.types import EntityKind, EntityRef
                     placements[second.task_keys[1]] = PlacementDecision(EntityRef(EntityKind.BS, 99), 2)
                 elif failure == "features":
                     second.dag.node_features[1, 0] = np.nan

@@ -2,9 +2,8 @@
 
 import unittest
 
-from env.channel_queue import EntityKind, EntityRef
-from env.server_queue import ServerState
-from env.task_runtime import TaskKey
+from env.runtime.server_queue import ServerState
+from env.types import EntityKind, EntityRef, TaskKey
 
 
 class TestServerState(unittest.TestCase):

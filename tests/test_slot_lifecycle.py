@@ -5,14 +5,14 @@ from unittest.mock import patch
 
 import numpy as np
 
-from env.channel_model import ChannelModel
-from env.channel_queue import EntityKind, EntityRef
-from env.dag_generator import DAG
-from env.environment import Environment
-from env.region import Region
-from env.uav import MasterUAV, MemberUAV
-from env.user import User
-from methods.contracts import PlacementDecision
+from env.communication.channel_model import ChannelModel
+from env.contracts import PlacementDecision
+from env.entities.region import Region
+from env.entities.uav import MasterUAV, MemberUAV
+from env.entities.user import User
+from env.simulator import Simulator
+from env.types import EntityKind, EntityRef
+from env.workload.dag_generator import DAG
 
 
 class TestSlotLifecycle(unittest.TestCase):
@@ -28,11 +28,11 @@ class TestSlotLifecycle(unittest.TestCase):
         masters.generate_from_region(self.region)
         self.members = MemberUAV()
         self.members.generate_from_region_and_user(self.region, self.users, masters)
-        self.environment = Environment(self.members, ChannelModel(), 0.1)
+        self.environment = Simulator(self.members, ChannelModel(), 0.1)
         self.actions = np.zeros((self.members.member_uav_count, 2))
         self.ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
         self.assertTrue(callable(getattr(self.environment, "begin_slot", None)),
-                        "Environment 必须提供正式 begin_slot 生命周期接口")
+                        "Simulator 必须提供正式 begin_slot 生命周期接口")
 
     def _begin(self):
         self.environment.begin_slot(self.region, self.users.positions, self.actions)
@@ -214,7 +214,7 @@ class TestSlotLifecycle(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 SchedulingConfig(value)
         self.assertEqual(SchedulingConfig.default().max_duration_s, 1.0)
-        self.environment = Environment(self.members, ChannelModel(), 0.1,
+        self.environment = Simulator(self.members, ChannelModel(), 0.1,
                                        scheduling_config=SchedulingConfig(0.25))
         self.assertEqual(self._begin().deadline, 0.25)
         first = self.environment.end_slot()

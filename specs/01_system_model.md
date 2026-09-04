@@ -144,9 +144,9 @@ Member UAV 的飞行阶段固定为 0.5 秒，不进入后续调度的离散事�
 
 ### 8.1 已实现的环境生命周期接口
 
-`Environment.begin_slot(region, user_positions, normalized_actions)` 依次应用飞行动作、刷新 Member 区域与用户关联、创建全新的 `SchedulingRuntime`，返回逐 Member 的越界布尔数组。当前运行时通过 `environment.runtime` 获取；调用方为每个 DAG 提供完整执行位置方案后提交。物理拓扑刷新接口不再接收运行时，保证先刷新拓扑再创建快照。
+`Simulator.begin_slot(region, user_positions, normalized_actions)` 依次应用飞行动作、刷新 Member 区域与用户关联、创建全新的 `SchedulingRuntime`，返回逐 Member 的越界布尔数组。当前运行时通过 `environment.runtime` 获取；调用方为每个 DAG 提供完整执行位置方案后提交。物理拓扑刷新接口不再接收运行时，保证先刷新拓扑再创建快照。
 
-`Environment.end_slot()` 推进到截止时刻，返回不可变的 `SlotResult`，随后将 `environment.runtime` 置为 `None`。结果包含时隙起止、各 DAG 的标识及完成/失败结果、窗口内传输和计算能耗，不保留运行时或资源队列。下一次 `begin_slot()` 从前一窗口截止时刻开始新的调度时间线，重新建立所有调度状态。禁止尚未结束时开始下一时隙，也禁止未开始或重复结束时隙。
+`Simulator.end_slot()` 推进到截止时刻，返回不可变的 `SlotResult`，随后将 `environment.runtime` 置为 `None`。结果包含时隙起止、各 DAG 的标识及完成/失败结果、窗口内传输和计算能耗，不保留运行时或资源队列。下一次 `begin_slot()` 从前一窗口截止时刻开始新的调度时间线，重新建立所有调度状态。禁止尚未结束时开始下一时隙，也禁止未开始或重复结束时隙。
 
 每个运行时均绑定固定起止时间，窗口长度由 `SchedulingConfig` 读取 `config/scheduling.toml`。推进到截止时刻会自动关闭；恰好在截止时刻完成的任务计入完成，但此时不再启动新的传输或计算。未完成 DAG 记录失败时刻，未完成子任务标记为 `FAILED`，事件、信道队列和计算占用被清除。运行时关闭后，即使调用方持有旧引用，也不能再提交、推进或更新拓扑。`finish_slot()` 可重复读取同一份结算结果。
 

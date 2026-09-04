@@ -4,15 +4,15 @@ import unittest
 
 import numpy as np
 
-from env.channel_model import ChannelModel
-from env.channel_queue import EntityKind, EntityRef
-from env.dag_generator import DAG
-from env.environment import Environment
-from env.task_runtime import TaskStatus
-from env.uav import MasterUAV, MemberUAV
-from env.region import Region
-from env.user import User
-from methods.contracts import DAGRequest, PlacementDecision
+from env.communication.channel_model import ChannelModel
+from env.contracts import DAGRequest, PlacementDecision
+from env.entities.region import Region
+from env.entities.uav import MasterUAV, MemberUAV
+from env.entities.user import User
+from env.runtime.task_runtime import TaskStatus
+from env.simulator import Simulator
+from env.types import EntityKind, EntityRef
+from env.workload.dag_generator import DAG
 from methods.ers import ERS
 
 
@@ -31,7 +31,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
         masters.generate_from_region(self.region)
         self.members = MemberUAV()
         self.members.generate_from_region_and_user(self.region, self.users, masters)
-        self.environment = Environment(
+        self.environment = Simulator(
             self.members,
             ChannelModel(),
             user_transmit_power=self.users.config.transmit_power,
