@@ -1,0 +1,2 @@
+# Optional CPU training dependency; existing project dependencies stay unchanged.
+torch>=2.6,<3.0
