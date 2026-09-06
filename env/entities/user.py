@@ -8,8 +8,9 @@ from env.settings import UserConfig
 class User:
     """基于区域地图生成全部固定地面用户。"""
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, *, rng):
         self.config = config if config is not None else UserConfig.default()
+        self.rng = rng
         self.positions = None
         self.region_ids = None
         self.region_user_counts = None
@@ -80,7 +81,7 @@ class User:
 
         region_map = region.region_map
         region_count = region.config.region_count
-        rng = np.random.default_rng(self.config.seed)
+        rng = self.rng
         region_areas = np.bincount(region_map.ravel(), minlength=region_count + 1)[1:]
         counts = self._allocate_region_user_counts(region_areas, rng)
 

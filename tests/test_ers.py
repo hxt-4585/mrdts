@@ -9,7 +9,7 @@ from env.contracts import DAGRequest
 from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 from env.types import DirectedChannelKey, EntityKind, EntityRef, TaskKey
 from env.workload.dag_generator import DAG
-from methods.ers import ERS
+from methods.components.ordering.ers import ERS
 
 
 def make_runtime(*, asymmetric=False):

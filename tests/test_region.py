@@ -16,6 +16,7 @@ import numpy as np
 # 将项目根目录加入 sys.path，便于导入 env 包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from experiments.randomness import RandomStreams
 from env.entities.region import Region
 from env.settings import RegionConfig
 
@@ -27,11 +28,11 @@ class TestRegionGeneration(unittest.TestCase):
         self.cfg = RegionConfig.default()
 
     def _make_manager(self, **kwargs):
-        return Region(replace(self.cfg, **kwargs))
+        return Region(replace(self.cfg, **kwargs), rng=RandomStreams.from_config().region)
 
     def test_default_generate_and_validate(self):
         """默认 R=4 生成并通过校验。"""
-        mgr = Region(self.cfg)
+        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
         mgr.generate()
         ok, sizes = mgr.validate()
         self.assertTrue(ok)
@@ -39,7 +40,7 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_full_coverage_and_no_overlap(self):
         """地图应全覆盖且每个网格只属于一个区域。"""
-        mgr = Region(self.cfg)
+        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
         region_map = mgr.generate()
         # 全覆盖：无 0 值
         self.assertTrue((region_map > 0).all())
@@ -50,7 +51,7 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_min_area_ratio(self):
         """每个区域面积不低于下限。"""
-        mgr = Region(self.cfg)
+        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
         mgr.generate()
         sizes = mgr.get_region_sizes()
         for r, s in enumerate(sizes):
@@ -58,7 +59,7 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_region_id_query(self):
         """坐标查询应与区域地图保持一致。"""
-        mgr = Region(self.cfg)
+        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
         region_map = mgr.generate()
         cell = self.cfg.cell_size
         # 抽样若干网格中心点查询
@@ -79,9 +80,9 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_reproducible_with_same_seed(self):
         """相同种子应生成相同地图。"""
-        mgr1 = Region(self.cfg)
+        mgr1 = Region(self.cfg, rng=RandomStreams.from_config().region)
         map1 = mgr1.generate()
-        mgr2 = Region(self.cfg)
+        mgr2 = Region(self.cfg, rng=RandomStreams.from_config().region)
         map2 = mgr2.generate()
         np.testing.assert_array_equal(map1, map2)
 
@@ -123,7 +124,7 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_regions_have_compact_boundaries(self):
         """默认区域不应出现随机扩张导致的细长尖刺。"""
-        mgr = Region(self.cfg)
+        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
         region_map = mgr.generate()
 
         for region_id in range(1, self.cfg.region_count + 1):
@@ -155,12 +156,12 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_save_and_load(self):
         """保存后加载的地图应与原地图一致。"""
-        mgr = Region(self.cfg)
+        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
         region_map = mgr.generate()
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tmp_region.npy")
         try:
             mgr.save(path)
-            mgr2 = Region(self.cfg)
+            mgr2 = Region(self.cfg, rng=RandomStreams.from_config().region)
             loaded = mgr2.load(path)
             np.testing.assert_array_equal(region_map, loaded)
         finally:
@@ -173,7 +174,7 @@ class TestRegionGeneration(unittest.TestCase):
             path = Path(directory) / "wrong_shape.npy"
             np.save(path, np.ones((2, 2), dtype=np.int32))
             with self.assertRaises(ValueError):
-                Region(self.cfg).load(path)
+                Region(self.cfg, rng=RandomStreams.from_config().region).load(path)
 
 
 if __name__ == "__main__":

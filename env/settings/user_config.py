@@ -14,7 +14,6 @@ class UserConfig:
     area_fluctuation: float
     center_bias: float
     center_spread_ratio: float
-    seed: int | None
     transmit_power: float
     core_frequency: float
 
@@ -36,7 +35,6 @@ class UserConfig:
             area_fluctuation=population["area_fluctuation"],
             center_bias=population["center_bias"],
             center_spread_ratio=population["center_spread_ratio"],
-            seed=population.get("seed"),
             transmit_power=population["transmit_power"],
             core_frequency=computation["core_frequency"],
         )

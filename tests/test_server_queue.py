@@ -11,7 +11,7 @@ class TestServerState(unittest.TestCase):
         server = ServerState(EntityRef(EntityKind.BS, 0), (10.0, 10.0), 0.1)
         tasks = [TaskKey(0, 0, 0, index) for index in range(3)]
         for index, task in enumerate(tasks):
-            server.enqueue(task, cpu_cycles=10.0, ready_at=0.0, ers_seq=index)
+            server.enqueue(task, cpu_cycles=10.0, ready_at=0.0, priority_seq=index)
 
         started = server.dispatch(0.0)
 
@@ -22,9 +22,9 @@ class TestServerState(unittest.TestCase):
         server = ServerState(EntityRef(EntityKind.MEMBER_UAV, 0), (10.0,), 0.1)
         first = TaskKey(0, 0, 0, 0)
         second = TaskKey(0, 0, 0, 1)
-        server.enqueue(first, cpu_cycles=10.0, ready_at=0.0, ers_seq=0)
+        server.enqueue(first, cpu_cycles=10.0, ready_at=0.0, priority_seq=0)
         running = server.dispatch(0.0)[0]
-        server.enqueue(second, cpu_cycles=10.0, ready_at=0.1, ers_seq=1)
+        server.enqueue(second, cpu_cycles=10.0, ready_at=0.1, priority_seq=1)
 
         server.finish(running.core_id, 1.0)
         started = server.dispatch(1.0)

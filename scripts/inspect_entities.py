@@ -12,6 +12,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from experiments.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV
 from env.entities.user import User
@@ -40,9 +41,9 @@ def _print_entity(name, entity, property_names=()):
 
 def inspect_default_entities():
     """生成默认实体并直接打印其所有当前属性。"""
-    region = Region()
+    region = Region(rng=RandomStreams.from_config().region)
     region.generate()
-    users = User()
+    users = User(rng=RandomStreams.from_config().user)
     users.generate_from_region(region)
     masters = MasterUAV()
     masters.generate_from_region(region)

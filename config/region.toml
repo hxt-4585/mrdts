@@ -15,5 +15,3 @@ area_imbalance = 0.5
 lloyd_iterations = 20
 # 每次 Lloyd 迭代中调整种子权重以逼近目标面积的最大次数。
 capacity_iterations = 80
-# 区域生成器的独立随机种子；相同配置与种子生成相同区域地图。
-seed = 41

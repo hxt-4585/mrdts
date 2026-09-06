@@ -21,6 +21,7 @@ import networkx as nx
 # 将项目根目录加入 sys.path，便于导入 env 包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from experiments.randomness import RandomStreams
 from env.settings import DAGConfig
 from env.workload.dag_generator import DAGGenerator
 
@@ -87,7 +88,7 @@ def draw_rho_comparison(rho_list, path):
 
     for ax, rho in zip(axes, rho_list):
         cfg = replace(DAGConfig.default(), rho=rho)
-        dag = DAGGenerator(cfg).generate_single_dag()
+        dag = DAGGenerator(cfg, rng=RandomStreams.from_config().dag, py_rng=RandomStreams.from_config().dag_python).generate_single_dag()
         g, pos = _layered_pos(dag)
 
         nx.draw_networkx_nodes(
@@ -115,7 +116,7 @@ def main():
 
     # 1. 默认参数的单个 DAG（含特征）
     default_cfg = DAGConfig.default()
-    dag = DAGGenerator(default_cfg).generate_single_dag()
+    dag = DAGGenerator(default_cfg, rng=RandomStreams.from_config().dag, py_rng=RandomStreams.from_config().dag_python).generate_single_dag()
     draw_single(
         dag,
         f"DAG example (n={default_cfg.n}, max_out={default_cfg.max_out}, "

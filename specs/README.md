@@ -1,6 +1,8 @@
 # MRDTS 环境设计文档
 
-本目录记录 MRDTS（Multi-Region Distributed Task Scheduling）强化学习环境的建模假设、参数设置与后续实现方案。
+本目录记录 MRDTS（Multi-Region Distributed Task Scheduling）仿真系统的建模假设、参数设置与后续实现方案。
+
+目录职责以项目根目录 README 为准：观测/奖励或优化目标属于 `methods/solutions/`，不固定在仿真器中；下表中的 RL 章节仅适用于具体学习方法。
 
 代码目录与导入迁移说明见 [环境代码结构](../env/README.md)。现有仿真入口为 `env.simulator.Simulator`，Gym 风格交互接口尚未实现。
 

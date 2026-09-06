@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 
+from experiments.randomness import RandomStreams
 from env.communication.channel_model import ChannelModel
 from env.contracts import DAGRequest, PlacementDecision
 from env.entities.region import Region
@@ -13,7 +14,7 @@ from env.runtime.task_runtime import TaskStatus
 from env.simulator import Simulator
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
-from methods.ers import ERS
+from methods.components.ordering.ers import ERS
 
 
 class TestMultiSlotScheduling(unittest.TestCase):
@@ -23,9 +24,9 @@ class TestMultiSlotScheduling(unittest.TestCase):
     DAGS_PER_SLOT = 2
 
     def setUp(self):
-        self.region = Region()
+        self.region = Region(rng=RandomStreams.from_config().region)
         self.region.generate()
-        self.users = User()
+        self.users = User(rng=RandomStreams.from_config().user)
         self.users.generate_from_region(self.region)
         masters = MasterUAV()
         masters.generate_from_region(self.region)
@@ -38,7 +39,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             user_core_frequency=self.users.config.core_frequency,
         )
         self.max_duration_s = self.environment.scheduling_config.max_duration_s
-        self.rng = np.random.default_rng(20260901)
+        self.rng = RandomStreams.from_config().scheduling
 
     def test_random_flight_and_random_placement_finish_two_dags_per_slot_before_deadline(self):
         for slot_id in range(self.SLOT_COUNT):
@@ -61,7 +62,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             placements = {key: PlacementDecision(self._random_execution_node(key.user_id, key.owner_member_id), seq)
                           for seq, key in enumerate(plan.order)}
             slot_task_keys = self.runtime.submit_dags(requests, placements, slot_start)
-            self.assertEqual(tuple(sorted(slot_task_keys, key=lambda key: self.runtime.trace(key).ers_seq)), plan.order)
+            self.assertEqual(tuple(sorted(slot_task_keys, key=lambda key: self.runtime.trace(key).priority_seq)), plan.order)
 
             slot_end = slot_start + self.max_duration_s
             result = self.environment.end_slot()
@@ -78,7 +79,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             self.assertEqual(set(self.runtime.tasks), set(slot_task_keys))
             self.assertEqual(len(self.runtime.dag_runtimes), self.DAGS_PER_SLOT)
             self.assertEqual(
-                sorted(task.ers_seq for task in self.runtime.tasks.values()),
+                sorted(task.priority_seq for task in self.runtime.tasks.values()),
                 list(range(len(slot_task_keys))),
             )
 
@@ -137,7 +138,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.environment.end_slot()
         task = self.runtime.trace(keys[0])
         self.assertEqual(task.status, TaskStatus.FINISHED)
-        self.assertEqual(task.ers_seq, 0)
+        self.assertEqual(task.priority_seq, 0)
         self.assertEqual(task.compute_start_at, self.max_duration_s)
         self.assertAlmostEqual(
             task.compute_finish_at,

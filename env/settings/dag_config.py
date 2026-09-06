@@ -7,13 +7,12 @@ import tomllib
 
 @dataclass(frozen=True)
 class DAGConfig:
-    """DAG 拓扑、特征与独立随机流的配置。"""
+    """DAG 拓扑与特征配置。"""
 
     n: int
     max_out: int
     rho: float
     delta: float
-    seed: int | None
     input_data_range: tuple[int, int]
     cpu_range: tuple[float, float]
     intermediate_data_range: tuple[int, int]
@@ -35,7 +34,6 @@ class DAGConfig:
             max_out=topology["max_out"],
             rho=topology["rho"],
             delta=topology["delta"],
-            seed=topology.get("seed"),
             input_data_range=tuple(features["input_data_range"]),
             cpu_range=tuple(features["cpu_range"]),
             intermediate_data_range=tuple(features["intermediate_data_range"]),

@@ -15,6 +15,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from experiments.randomness import RandomStreams
 from env.communication.channel_model import ChannelModel
 from env.contracts import DAGRequest, PlacementDecision
 from env.entities.region import Region
@@ -25,7 +26,7 @@ from env.settings import UAVConfig, UserConfig
 from env.simulator import Simulator
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
-from methods.ers import ERS
+from methods.components.ordering.ers import ERS
 
 
 def entity_id(entity):
@@ -38,11 +39,11 @@ def task_id(key):
 
 
 def make_scene():
-    region = Region()
+    region = Region(rng=RandomStreams.from_config().region)
     region.generate()
     count = region.config.region_count
     users = User(replace(UserConfig.default(), total_users=count, min_users_per_region=1,
-                         area_fluctuation=0.0, seed=41))
+                         area_fluctuation=0.0), rng=RandomStreams.from_config().user)
     users.generate_from_region(region)
     config = replace(UAVConfig.default(), master_uav_count=count,
                      member_uav_count=2 * count, min_members_per_region=2)
@@ -134,7 +135,7 @@ def build_replay(load_scale=1.0, initial_region=1):
         label = f"D{key.dag_id} / T{key.node_id}"
         costs = plan.costs[key.owner_member_id, key.user_id, key.dag_id]
         tasks.append(dict(id=tid, label=label, node=key.node_id, dag=f"d{key.dag_id}", region=region_id,
-                          execution=entity_id(task.execution_node), ers=task.ers_seq,
+                          execution=entity_id(task.execution_node), ers=task.priority_seq,
                           rank_s=plan.ranks[key], average_compute_s=costs.average_compute_s[key.node_id],
                           average_edge_comm_s={str(child): value for (parent, child), value
                                                in costs.average_edge_comm_s.items() if parent == key.node_id},
@@ -167,7 +168,7 @@ def build_replay(load_scale=1.0, initial_region=1):
                                       kind="input" if parent is None else "result", label=name,
                                       predecessor=task_id(parent) if parent is not None else None,
                                       hop=hop, hop_count=len(record.transfer_ids), source=source, target=target,
-                                      queue_order=order, ers=job.ers_seq, source_ready=job.source_ready_at,
+                                      queue_order=order, ers=job.priority_seq, source_ready=job.source_ready_at,
                                       duration=job.duration_s, start=job.start_at, finish=finish,
                                       display_end=display_end, completed=completed, energy_j=energy))
                 event(job.start_at, "transfer_start", region_id,

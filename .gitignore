@@ -13,6 +13,8 @@ handoff.md
 # 生成产物
 figs/
 scripts/output/
+results/*
+!results/README.md
 
 # Claude Code 内部目录
 .claude/

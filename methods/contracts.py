@@ -1,57 +1,62 @@
-"""可替换的飞行、调度方法协议及其输入输出。"""
+"""算法业务接口；不要求组件具有 RL 观测、奖励或训练能力。"""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from pathlib import Path
+from typing import TYPE_CHECKING, Mapping, Protocol, Sequence
 
 import numpy as np
 
-from env.runtime.dag_runtime import DAGRuntime
-from env.workload.dag_generator import DAG
+from env.contracts import DAGRequest
+from env.runtime.event_runtime import SchedulingRuntime
+from env.types import EntityRef, TaskKey
+
+if TYPE_CHECKING:
+    import torch
+    from experiments.config import ExperimentConfig
+
+
+class OrderingPlan(Protocol):
+    @property
+    def order(self) -> tuple[TaskKey, ...]: ...
+
+
+class OrderingComponent(Protocol):
+    def plan(self, runtime: SchedulingRuntime, requests: Sequence[DAGRequest]) -> OrderingPlan:
+        """只读资源与通信成本，不推进或提交真实运行时。"""
+        ...
+
+
+@dataclass(frozen=True)
+class FlightContext:
+    master_id: int
+    member_ids: tuple[int, ...]
+    positions: np.ndarray
 
 
 @dataclass(frozen=True)
 class FlightDecision:
-    """一个时隙内全部 Member UAV 的二维飞行动作。"""
-
-    member_actions: np.ndarray
+    member_actions: Mapping[int, tuple[float, float]]
 
 
-@dataclass(frozen=True)
-class SchedulingRequest:
-    """一次 DAG 调度所需的、与当前环境实现无关的输入。"""
-
-    user_position: np.ndarray
-    user_region_id: int
+class FlightComponent(Protocol):
+    def decide(self, context: FlightContext) -> FlightDecision: ...
 
 
 @dataclass(frozen=True)
-class TaskAssignment:
-    """一个子任务的执行位置与时间安排。"""
-
-    node_id: int
-    server_id: int
-    start_time: float
-    finish_time: float
-    ingress_relay_id: int | None = None
+class SchedulingContext:
+    owner: EntityRef
+    requests: tuple[DAGRequest, ...]
+    order: tuple[TaskKey, ...]
+    candidates: Mapping[TaskKey, tuple[EntityRef, ...]]
 
 
-@dataclass(frozen=True)
-class DAGSchedulingResult:
-    """单个 DAG 的调度结果。"""
-
-    assignments: tuple[TaskAssignment, ...]
-    completion_time: float
+class SchedulingComponent(Protocol):
+    def schedule(self, context: SchedulingContext) -> Mapping[TaskKey, EntityRef]: ...
 
 
-class TrajectoryMethod(Protocol):
-    """可替换的 Member 飞行决策组件。"""
-
-    def decide(self, member_count: int) -> FlightDecision: ...
-
-
-class SchedulingMethod(Protocol):
-    """可替换的 DAG 调度组件。"""
-
-    def schedule_dag(
-        self, dag: DAG, runtime: DAGRuntime, request: SchedulingRequest
-    ) -> DAGSchedulingResult: ...
+class Trainer(Protocol):
+    def train(self, config: ExperimentConfig, device: torch.device) -> Path:
+        """方法自己的训练组织；返回模型和训练记录所在的运行目录。"""
+        ...

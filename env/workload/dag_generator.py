@@ -9,7 +9,6 @@ DAG 采用「分层」方式生成：
 """
 
 import math
-import random
 from dataclasses import dataclass
 
 import numpy as np
@@ -38,12 +37,12 @@ class DAG:
 class DAGGenerator:
     """DAG 任务生成器。"""
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, *, rng, py_rng):
         # 允许传入自定义配置，便于后续按区域差异调整 DAG 复杂度
         self.config = config if config is not None else DAGConfig.default()
-        # DAG 使用实例私有随机流，不受其他模块的全局随机状态影响。
-        self._np_rng = np.random.default_rng(self.config.seed)
-        self._py_rng = random.Random(self.config.seed)
+        # 随机流由实验入口注入，生成器不读取或设置种子。
+        self._np_rng = rng
+        self._py_rng = py_rng
 
     # ------------------------------ DAG 拓扑生成 ------------------------------ #
     def _generate_layers(self, n, rho, delta):

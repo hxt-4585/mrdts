@@ -1,6 +1,6 @@
 # 环境代码结构
 
-`env` 负责仿真，以及后续强化学习问题的定义；`methods` 负责排序、策略和学习算法。
+`env` 只负责仿真事实、物理约束与执行；`methods` 负责排序、策略、方法自己的观测/奖励或优化目标。
 
 ## 当前已实现
 
@@ -52,13 +52,16 @@ from env.workload.dag_generator import DAGGenerator
 
 `Simulator` 的构造参数、`begin_slot()`、`end_slot()` 等方法及其行为保持不变。现有脚本的启动命令不变，例如 `python scripts/visualize_scheduling.py`。
 
-## 后续强化学习扩展（尚未实现）
+## 方法与训练边界
 
-后续在 `env/environment.py` 实现唯一公开的 `MRDTSEnv`，组合 `Simulator`，提供 `reset/step`。
-状态、观测、动作、奖励及空间定义放在 `env/mdp/`，而不是顶层 `rl/`。
-环境只维护一套真实仿真状态；神经网络、动作采样、轨迹缓存和 PPO 更新仍属于 `methods`。
+环境只维护一套真实仿真状态，不定义固定的 RL 观测与奖励。
+完整方法放在 `methods/solutions/`，决定可见信息、观测编码、奖励或优化目标。
+RL 库需要 `reset/step` 时，由方法自己的 `adapter.py` 包装 `Simulator`。
+三类可替换算法放在 `methods/components/ordering|flight|scheduling/`。
+正式训练、评估与结果整理放在 `experiments/`，生成产物放在 `results/`。
 
-本次不创建这些模块的空壳，不改变仿真参数、时隙推进、时延/能耗计算或 ERS 规则。
+排序序号统一为算法无关的 `priority_seq`（原 `ers_seq`）；只调整命名，不改变队列顺序或数值行为。
+ERS 新入口：`methods.components.ordering.ers.ERS`。原单 DAG 方法协议已由三类业务组件协议替代。
 
 ## 验证
 

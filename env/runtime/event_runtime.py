@@ -110,7 +110,7 @@ class SchedulingRuntime:
         self._events: list[tuple[float, int, str, object]] = []
         self._event_counter = count()
         self._transfer_counter = count()
-        self._next_ers_seq = 0
+        self._next_priority_seq = 0
         self.now = self.slot_start
         if member_regions is not None or ground_owner_members is not None:
             if member_regions is None or ground_owner_members is None:
@@ -161,10 +161,10 @@ class SchedulingRuntime:
         placements: Mapping[TaskKey, PlacementDecision],
         epoch_start: float,
     ) -> tuple[TaskKey, ...]:
-        """整批准备成功后统一入队和启动，保留跨 DAG 的相对 ERS 顺序。
+        """整批准备成功后统一入队和启动，保留跨 DAG 的相对优先顺序。
 
         本批序号压缩为连续编号并追加在已提交批次之后；已经启动的任务
-        不参与重新排序。一个 Member 的同批 DAG 应先一起调用 ERS.plan。
+        不参与重新排序。一个 Member 的同批 DAG 应先一起调用排序组件。
         """
         self._require_open()
         epoch_start = float(epoch_start)
@@ -182,22 +182,22 @@ class SchedulingRuntime:
         required = {key for request in requests for key in request.task_keys}
         if set(placements) != required:
             raise ValueError("每个子任务必须恰有一个 placement")
-        sequences = [decision.ers_seq for decision in placements.values()]
+        sequences = [decision.priority_seq for decision in placements.values()]
         if any(isinstance(seq, bool) or not isinstance(seq, int) or seq < 0 for seq in sequences):
-            raise ValueError("ers_seq 必须为非负整数")
+            raise ValueError("priority_seq 必须为非负整数")
         if len(set(sequences)) != len(sequences):
-            raise ValueError("同一批次的 ers_seq 不能重复")
+            raise ValueError("同一批次的 priority_seq 不能重复")
         for request in requests:
             decisions = {key.node_id: placements[key] for key in request.task_keys}
             self._validate_submission_topology(request.owner_member, request.ground_device, decisions)
             for parent, child in request.dag.edges:
-                if decisions[parent].ers_seq >= decisions[child].ers_seq:
-                    raise ValueError("ERS 顺序必须使前驱先于后继，避免信道队首阻塞死锁")
-        order = sorted(placements, key=lambda key: placements[key].ers_seq)
-        global_ers = {key: self._next_ers_seq + i for i, key in enumerate(order)}
+                if decisions[parent].priority_seq >= decisions[child].priority_seq:
+                    raise ValueError("优先顺序必须使前驱先于后继，避免信道队首阻塞死锁")
+        order = sorted(placements, key=lambda key: placements[key].priority_seq)
+        global_priority = {key: self._next_priority_seq + i for i, key in enumerate(order)}
         # 预备阶段仅修改局部状态，连传输 ID 计数也在成功后才提交。
         transfer_counter = copy(self._transfer_counter)
-        prepared = [self._prepare_dag(request, placements, global_ers, epoch_start, transfer_counter)
+        prepared = [self._prepare_dag(request, placements, global_priority, epoch_start, transfer_counter)
                     for request in sorted(requests, key=lambda item: item.key)]
         pending = [item for dag in prepared for item in dag.pending]
         for dag in prepared:
@@ -209,20 +209,20 @@ class SchedulingRuntime:
                 self._local_successors[key].extend(children)
             self._ready_for_server.update(key for key, task in dag.tasks.items() if task.data_ready_at is not None)
         for key, job, binding in sorted(pending, key=lambda item: (
-            item[0].source, item[0].target, item[1].ers_seq, item[1].transfer_id
+            item[0].source, item[0].target, item[1].priority_seq, item[1].transfer_id
         )):
             state = self.channels.setdefault(key, DirectedChannelState(key))
             state.enqueue(job)
             self._transfer_channel[job.transfer_id] = key
             self._transfer_bindings[job.transfer_id] = binding
-        self._next_ers_seq += len(order)
+        self._next_priority_seq += len(order)
         self._transfer_counter = transfer_counter
         self._dispatch(self.now)
         return tuple(key for dag in prepared for key in dag.tasks)
 
     def _prepare_dag(
         self, request: DAGRequest, placements: Mapping[TaskKey, PlacementDecision],
-        global_ers: Mapping[TaskKey, int], epoch_start: float, transfer_counter: count,
+        global_priority: Mapping[TaskKey, int], epoch_start: float, transfer_counter: count,
     ) -> _PreparedDAG:
         dag, ground_device, owner_member = request.dag, request.ground_device, request.owner_member
         prepared = _PreparedDAG(request.key, {}, DAGRuntime(dag), [], defaultdict(list), defaultdict(list))
@@ -237,7 +237,7 @@ class SchedulingRuntime:
             prepared.tasks[key] = TaskRuntime(
                 key=key,
                 execution_node=decision.execution_node,
-                ers_seq=global_ers[key],
+                priority_seq=global_priority[key],
                 cpu_cycles=float(dag.node_features[node, 1]),
                 input_bits=float(dag.node_features[node, 0]) * 8.0 * 1024.0,
                 predecessors={node_keys[parent] for parent in predecessors[node]},
@@ -420,7 +420,7 @@ class SchedulingRuntime:
             transfer_id = transfer_ids[index]
             job = TransferJob(
                 transfer_id=transfer_id,
-                ers_seq=task.ers_seq,
+                priority_seq=task.priority_seq,
                 source_ready_at=source_ready_at if index == 0 else None,
                 duration_s=self.transfer_duration_s(hop, payload_bits),
             )
@@ -551,11 +551,11 @@ class SchedulingRuntime:
             return
         for task_key in sorted(
             self._ready_for_server,
-            key=lambda key: (self.tasks[key].data_ready_at, self.tasks[key].ers_seq, key),
+            key=lambda key: (self.tasks[key].data_ready_at, self.tasks[key].priority_seq, key),
         ):
             task = self.tasks[task_key]
             self.servers[task.execution_node].enqueue(
-                task.key, task.cpu_cycles, task.data_ready_at, task.ers_seq
+                task.key, task.cpu_cycles, task.data_ready_at, task.priority_seq
             )
         self._ready_for_server.clear()
         for key in sorted(self.channels, key=lambda channel: (channel.source, channel.target)):

@@ -19,7 +19,7 @@ class TransferJob:
     """等待源数据就绪的单次、不可抢占传输。"""
 
     transfer_id: str
-    ers_seq: int
+    priority_seq: int
     source_ready_at: float | None
     duration_s: float
     status: TransferStatus = field(default=TransferStatus.QUEUED, init=False)
@@ -29,8 +29,8 @@ class TransferJob:
     def __post_init__(self) -> None:
         if not isinstance(self.transfer_id, str) or not self.transfer_id:
             raise ValueError("transfer_id 必须为非空字符串")
-        if isinstance(self.ers_seq, bool) or not isinstance(self.ers_seq, int) or self.ers_seq < 0:
-            raise ValueError("ers_seq 必须为非负整数")
+        if isinstance(self.priority_seq, bool) or not isinstance(self.priority_seq, int) or self.priority_seq < 0:
+            raise ValueError("priority_seq 必须为非负整数")
         if self.source_ready_at is not None:
             self.source_ready_at = self.validate_time(self.source_ready_at, "source_ready_at")
         self.duration_s = self.validate_duration(self.duration_s)
@@ -60,19 +60,19 @@ class DirectedChannelState:
     next_free_at: float = 0.0
     _transfer_ids: set[str] = field(default_factory=set, init=False, repr=False)
     _jobs: dict[str, TransferJob] = field(default_factory=dict, init=False, repr=False)
-    _last_enqueued_ers_seq: int = field(default=-1, init=False, repr=False)
+    _last_enqueued_priority_seq: int = field(default=-1, init=False, repr=False)
 
     def enqueue(self, job: TransferJob) -> None:
         if job.transfer_id in self._transfer_ids:
             raise ValueError(f"传输作业 {job.transfer_id!r} 已存在于该信道")
         if job.status is not TransferStatus.QUEUED:
             raise ValueError("只能将 QUEUED 状态的传输作业加入信道")
-        if job.ers_seq < self._last_enqueued_ers_seq:
+        if job.priority_seq < self._last_enqueued_priority_seq:
             raise ValueError("同一信道的传输必须按非递减 ERS 顺序入队")
         self.queued.append(job)
         self._transfer_ids.add(job.transfer_id)
         self._jobs[job.transfer_id] = job
-        self._last_enqueued_ers_seq = job.ers_seq
+        self._last_enqueued_priority_seq = job.priority_seq
 
     def mark_source_ready(self, transfer_id: str, at: float) -> None:
         job = self._jobs.get(transfer_id)

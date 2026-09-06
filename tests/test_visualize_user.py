@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from experiments.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.user import User
 from scripts.visualize_user import draw_user_distribution
@@ -19,9 +20,9 @@ from scripts.visualize_user import draw_user_distribution
 class TestUserDistributionDrawing(unittest.TestCase):
     def test_draw_user_distribution_plots_all_users(self):
         """散点图应包含所有用户，并以米作为二维坐标轴单位。"""
-        region = Region()
+        region = Region(rng=RandomStreams.from_config().region)
         region.generate()
-        users = User()
+        users = User(rng=RandomStreams.from_config().user)
         users.generate_from_region(region)
         fig, ax = plt.subplots()
         try:

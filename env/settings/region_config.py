@@ -16,7 +16,6 @@ class RegionConfig:
     area_imbalance: float
     lloyd_iterations: int
     capacity_iterations: int
-    seed: int | None
 
     @classmethod
     def default(cls) -> "RegionConfig":
@@ -53,5 +52,4 @@ class RegionConfig:
             area_imbalance=partition["area_imbalance"],
             lloyd_iterations=partition["lloyd_iterations"],
             capacity_iterations=partition["capacity_iterations"],
-            seed=partition.get("seed"),
         )

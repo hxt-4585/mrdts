@@ -19,11 +19,11 @@ class TestDirectedChannelState(unittest.TestCase):
 
     @staticmethod
     def _job(
-        transfer_id: str, ers_seq: int, source_ready_at: float, duration_s: float
+        transfer_id: str, priority_seq: int, source_ready_at: float, duration_s: float
     ) -> TransferJob:
         return TransferJob(
             transfer_id=transfer_id,
-            ers_seq=ers_seq,
+            priority_seq=priority_seq,
             source_ready_at=source_ready_at,
             duration_s=duration_s,
         )

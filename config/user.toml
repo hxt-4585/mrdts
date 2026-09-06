@@ -9,8 +9,6 @@ area_fluctuation = 0.1
 center_bias = 0.85
 # 中心分布的扩散范围，相对于区域等效半径；值越大，分布越平缓。
 center_spread_ratio = 0.25
-# 用户位置与区域用户数分配使用的独立随机种子。
-seed = 60
 # 地面用户向 UAV 上传任务数据时的发射功率（W）。
 transmit_power = 0.1
 

@@ -26,7 +26,7 @@ class TransferRecord:
 class TaskRuntime:
     key: TaskKey
     execution_node: EntityRef
-    ers_seq: int
+    priority_seq: int
     cpu_cycles: float
     input_bits: float
     predecessors: set[TaskKey]

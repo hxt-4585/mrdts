@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from experiments.randomness import RandomStreams
 from env.communication.channel_model import ChannelModel
 from env.contracts import PlacementDecision
 from env.entities.region import Region
@@ -18,11 +19,11 @@ from env.workload.dag_generator import DAG
 class TestSlotLifecycle(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.region = Region()
+        cls.region = Region(rng=RandomStreams.from_config().region)
         cls.region.generate()
 
     def setUp(self):
-        self.users = User()
+        self.users = User(rng=RandomStreams.from_config().user)
         self.users.generate_from_region(self.region)
         masters = MasterUAV()
         masters.generate_from_region(self.region)
@@ -99,7 +100,7 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertFalse(new_runtime.tasks)
         self.assertFalse(new_runtime.dag_runtimes)
         key = self._submit(new_runtime)
-        self.assertEqual(new_runtime.trace(key).ers_seq, 0)
+        self.assertEqual(new_runtime.trace(key).priority_seq, 0)
         next_result = self.environment.end_slot()
         self.assertEqual(new_runtime.trace(key).compute_start_at, 1.0)
         self.assertAlmostEqual(new_runtime.trace(key).compute_finish_at, 1.01)

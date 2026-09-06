@@ -7,7 +7,7 @@ import numpy as np
 from env.contracts import DAGRequest, PlacementDecision
 from env.types import DirectedChannelKey
 from env.workload.dag_generator import DAG
-from methods.ers import ERS
+from methods.components.ordering.ers import ERS
 from tests.test_ers import make_dag, make_runtime
 
 
@@ -25,8 +25,8 @@ class TestERSRuntime(unittest.TestCase):
             keys = runtime.submit_dags(requests, placements, runtime.now)
             self.assertEqual(set(keys), set(plan.order))
             channel = runtime.channel_state(DirectedChannelKey(ground, member))
-            self.assertEqual(channel.active.ers_seq, 0)
-            self.assertEqual([job.ers_seq for job in channel.queued], [1, 2, 3])
+            self.assertEqual(channel.active.priority_seq, 0)
+            self.assertEqual([job.priority_seq for job in channel.queued], [1, 2, 3])
             self.assertEqual(runtime.trace(plan.order[0]).input_record.start_at, 0.)
             self.assertIsNone(runtime.trace(plan.order[1]).input_record.start_at)
             result = runtime.finish_slot()
@@ -34,7 +34,7 @@ class TestERSRuntime(unittest.TestCase):
             rows = [(key, runtime.trace(key).input_arrival_at, runtime.trace(key).compute_start_at)
                     for key in plan.order]
             for index, key in enumerate(plan.order):
-                self.assertEqual(runtime.trace(key).ers_seq, index)
+                self.assertEqual(runtime.trace(key).priority_seq, index)
                 self.assertAlmostEqual(runtime.trace(key).input_arrival_at, .05 * (index + 1))
             self.assertEqual(sorted(plan.order, key=lambda key: runtime.trace(key).compute_start_at), list(plan.order))
             traces.append(rows)
@@ -105,7 +105,7 @@ class TestERSRuntime(unittest.TestCase):
                 self.assertTrue(all(not s.queue and not s.running for s in runtime.servers.values()))
                 keys = runtime.submit_dag(0, first.dag, member, ground,
                                           {0: PlacementDecision(ground, 0)}, runtime.now)
-                self.assertEqual(runtime.trace(keys[0]).ers_seq, 0)
+                self.assertEqual(runtime.trace(keys[0]).priority_seq, 0)
 
     def test_later_batch_appends_without_reordering_running_work(self):
         runtime, ground, member, _ = make_runtime()
@@ -113,8 +113,8 @@ class TestERSRuntime(unittest.TestCase):
         second = DAGRequest(1, make_dag((3e7,)), member, ground)
         runtime.submit_dags([first], {first.task_keys[0]: PlacementDecision(ground, 50)}, runtime.now)
         runtime.submit_dags([second], {second.task_keys[0]: PlacementDecision(ground, 0)}, runtime.now)
-        self.assertEqual(runtime.trace(first.task_keys[0]).ers_seq, 0)
-        self.assertEqual(runtime.trace(second.task_keys[0]).ers_seq, 1)
+        self.assertEqual(runtime.trace(first.task_keys[0]).priority_seq, 0)
+        self.assertEqual(runtime.trace(second.task_keys[0]).priority_seq, 1)
         runtime.finish_slot()
         self.assertAlmostEqual(runtime.trace(second.task_keys[0]).compute_start_at, .01)
 

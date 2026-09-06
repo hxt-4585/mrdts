@@ -11,7 +11,7 @@ class TestTaskRuntime(unittest.TestCase):
         task = TaskRuntime(
             key=TaskKey(0, 1, 2, 3),
             execution_node=EntityRef(EntityKind.BS, 0),
-            ers_seq=5,
+            priority_seq=5,
             cpu_cycles=10.0,
             input_bits=8.0,
             predecessors={TaskKey(0, 1, 2, 0), TaskKey(0, 1, 2, 1)},

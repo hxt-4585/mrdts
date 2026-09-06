@@ -20,7 +20,7 @@ class _QueuedCompute:
     task_key: TaskKey
     cpu_cycles: float
     ready_at: float
-    ers_seq: int
+    priority_seq: int
 
 
 @dataclass
@@ -41,16 +41,16 @@ class ServerState:
     def queued_task_keys(self) -> tuple[TaskKey, ...]:
         return tuple(item.task_key for item in self.queue)
 
-    def enqueue(self, task_key: TaskKey, cpu_cycles: float, ready_at: float, ers_seq: int) -> None:
+    def enqueue(self, task_key: TaskKey, cpu_cycles: float, ready_at: float, priority_seq: int) -> None:
         if cpu_cycles <= 0.0:
             raise ValueError("cpu_cycles 必须为正")
-        if self.queue and (ready_at, ers_seq, task_key) < (
+        if self.queue and (ready_at, priority_seq, task_key) < (
             self.queue[-1].ready_at,
-            self.queue[-1].ers_seq,
+            self.queue[-1].priority_seq,
             self.queue[-1].task_key,
         ):
             raise ValueError("服务器 FIFO 入队顺序不可倒退")
-        self.queue.append(_QueuedCompute(task_key, float(cpu_cycles), float(ready_at), ers_seq))
+        self.queue.append(_QueuedCompute(task_key, float(cpu_cycles), float(ready_at), priority_seq))
 
     def dispatch(self, now: float) -> tuple[ComputeRecord, ...]:
         idle = [core_id for core_id in range(len(self.core_frequencies)) if core_id not in self.running]

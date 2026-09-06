@@ -60,8 +60,8 @@ class TestSchedulingRuntime(unittest.TestCase):
             owner_member=self.member,
             ground_device=self.ground,
             placements={
-                0: PlacementDecision(self.bs, ers_seq=0),
-                1: PlacementDecision(self.bs, ers_seq=1),
+                0: PlacementDecision(self.bs, priority_seq=0),
+                1: PlacementDecision(self.bs, priority_seq=1),
             },
             epoch_start=0.0,
         )
@@ -89,8 +89,8 @@ class TestSchedulingRuntime(unittest.TestCase):
             owner_member=self.member,
             ground_device=self.ground,
             placements={
-                0: PlacementDecision(self.member, ers_seq=0),
-                1: PlacementDecision(self.member, ers_seq=1),
+                0: PlacementDecision(self.member, priority_seq=0),
+                1: PlacementDecision(self.member, priority_seq=1),
             },
             epoch_start=0.0,
         )
@@ -111,8 +111,8 @@ class TestSchedulingRuntime(unittest.TestCase):
             owner_member=self.member,
             ground_device=self.ground,
             placements={
-                0: PlacementDecision(self.member, ers_seq=0),
-                1: PlacementDecision(self.member, ers_seq=1),
+                0: PlacementDecision(self.member, priority_seq=0),
+                1: PlacementDecision(self.member, priority_seq=1),
             },
             epoch_start=0.0,
         )
@@ -148,8 +148,8 @@ class TestSchedulingRuntime(unittest.TestCase):
                 owner_member=self.member,
                 ground_device=self.ground,
                 placements={
-                    0: PlacementDecision(self.other_member, ers_seq=0),
-                    1: PlacementDecision(self.other_member, ers_seq=1),
+                    0: PlacementDecision(self.other_member, priority_seq=0),
+                    1: PlacementDecision(self.other_member, priority_seq=1),
                 },
                 epoch_start=0.0,
             )
@@ -164,8 +164,8 @@ class TestSchedulingRuntime(unittest.TestCase):
                 owner_member=self.member,
                 ground_device=self.ground,
                 placements={
-                    0: PlacementDecision(other_ground, ers_seq=0),
-                    1: PlacementDecision(self.member, ers_seq=1),
+                    0: PlacementDecision(other_ground, priority_seq=0),
+                    1: PlacementDecision(self.member, priority_seq=1),
                 },
                 epoch_start=0.0,
             )
@@ -181,8 +181,8 @@ class TestSchedulingRuntime(unittest.TestCase):
                 owner_member=self.member,
                 ground_device=self.ground,
                 placements={
-                    0: PlacementDecision(self.member, ers_seq=0),
-                    1: PlacementDecision(self.bs, ers_seq=1),
+                    0: PlacementDecision(self.member, priority_seq=0),
+                    1: PlacementDecision(self.bs, priority_seq=1),
                 },
                 epoch_start=0.0,
             )
@@ -197,8 +197,8 @@ class TestSchedulingRuntime(unittest.TestCase):
                 owner_member=self.member,
                 ground_device=self.ground,
                 placements={
-                    0: PlacementDecision(other_bs, ers_seq=0),
-                    1: PlacementDecision(self.member, ers_seq=1),
+                    0: PlacementDecision(other_bs, priority_seq=0),
+                    1: PlacementDecision(self.member, priority_seq=1),
                 },
                 epoch_start=0.0,
             )
@@ -235,8 +235,8 @@ class TestSchedulingRuntime(unittest.TestCase):
             owner_member=self.member,
             ground_device=self.ground,
             placements={
-                0: PlacementDecision(self.ground, ers_seq=0),
-                1: PlacementDecision(self.ground, ers_seq=1),
+                0: PlacementDecision(self.ground, priority_seq=0),
+                1: PlacementDecision(self.ground, priority_seq=1),
             },
             epoch_start=0.0,
         )
@@ -259,8 +259,8 @@ class TestSchedulingRuntime(unittest.TestCase):
             owner_member=self.member,
             ground_device=self.ground,
             placements={
-                0: PlacementDecision(self.bs, ers_seq=0),
-                1: PlacementDecision(self.ground, ers_seq=1),
+                0: PlacementDecision(self.bs, priority_seq=0),
+                1: PlacementDecision(self.ground, priority_seq=1),
             },
             epoch_start=0.0,
         )

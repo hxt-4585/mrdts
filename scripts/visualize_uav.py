@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from experiments.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV
 from env.entities.user import User
@@ -127,9 +128,9 @@ def draw_uav_distribution(region, users, masters, members, ax):
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    region = Region()
+    region = Region(rng=RandomStreams.from_config().region)
     region.generate()
-    users = User()
+    users = User(rng=RandomStreams.from_config().user)
     users.generate_from_region(region)
     masters = MasterUAV()
     masters.generate_from_region(region)

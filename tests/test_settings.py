@@ -7,6 +7,7 @@ import unittest
 
 import numpy as np
 
+from experiments.randomness import RandomStreams
 from env.settings import ChannelConfig, DAGConfig, RegionConfig, UAVConfig, UserConfig
 from env.workload.dag_generator import DAGGenerator
 
@@ -41,7 +42,6 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.center_spread_ratio, 0.25)
         self.assertEqual(config.transmit_power, 0.1)
         self.assertEqual(config.core_frequency, 1e9)
-        self.assertEqual(config.seed, 60)
 
     def test_channel_config_loads_link_and_propagation_parameters(self):
         """通信模型配置应保留三类带宽与 LoS/NLoS 参数。"""
@@ -83,25 +83,31 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(member["coverage_radius"], 180.0)
         self.assertEqual(member["transmit_power"], 1.0)
 
-    def test_dag_and_region_use_distinct_seeds(self):
-        region = RegionConfig.from_toml(PROJECT_ROOT / "config" / "region.toml")
-        dag = DAGConfig.from_toml(PROJECT_ROOT / "config" / "dag.toml")
+    def test_only_experiment_configs_define_seed(self):
+        from dataclasses import fields
 
-        self.assertIsInstance(region.seed, int)
-        self.assertIsInstance(dag.seed, int)
-        self.assertNotEqual(region.seed, dag.seed)
+        def contains_seed(value):
+            return isinstance(value, dict) and any(
+                key == "seed" or contains_seed(item) for key, item in value.items())
+
+        for path in (PROJECT_ROOT / "config").rglob("*.toml"):
+            if "experiments" in path.relative_to(PROJECT_ROOT / "config").parts:
+                continue
+            with path.open("rb") as stream:
+                self.assertFalse(contains_seed(tomllib.load(stream)), str(path))
+        for cls in (RegionConfig, UserConfig, DAGConfig):
+            self.assertNotIn("seed", {field.name for field in fields(cls)})
 
     def test_dag_seed_is_independent_of_global_random_state(self):
         config_path = PROJECT_ROOT / "config" / "dag.toml"
         config = DAGConfig.from_toml(config_path)
 
-        np.random.seed(1)
-        random.seed(1)
-        first = DAGGenerator(config).generate_single_dag()
+        first = DAGGenerator(config, rng=RandomStreams.from_config().dag, py_rng=RandomStreams.from_config().dag_python).generate_single_dag()
 
-        np.random.seed(999)
-        random.seed(999)
-        second = DAGGenerator(config).generate_single_dag()
+        np.random.random(100)
+        for _ in range(100):
+            random.random()
+        second = DAGGenerator(config, rng=RandomStreams.from_config().dag, py_rng=RandomStreams.from_config().dag_python).generate_single_dag()
 
         self.assertEqual(first.edges, second.edges)
         np.testing.assert_array_equal(first.node_features, second.node_features)

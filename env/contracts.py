@@ -11,7 +11,7 @@ class PlacementDecision:
     """智能体对一个子任务给出的执行位置，不预先伪造执行时间。"""
 
     execution_node: EntityRef
-    ers_seq: int
+    priority_seq: int
 
 
 @dataclass(frozen=True)

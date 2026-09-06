@@ -19,8 +19,9 @@ from env.settings import RegionConfig
 class Region:
     """区域实体：生成区域地图、查询实体区域归属、校验与存取。"""
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, *, rng):
         self.config = config if config is not None else RegionConfig.default()
+        self.rng = rng
         # 区域地图：shape=(grid_size, grid_size)，取值 1..R，0 表示未分配
         self.region_map = None
 
@@ -159,7 +160,7 @@ class Region:
         if not isinstance(cfg.capacity_iterations, int) or cfg.capacity_iterations < 1:
             raise ValueError("capacity_iterations 必须是正整数")
 
-        rng = np.random.default_rng(cfg.seed)
+        rng = self.rng
         coordinates = self._cell_coordinates(grid_size)
         seeds = self._select_seeds(rng).astype(float)
         targets = self._compute_target_sizes(total)

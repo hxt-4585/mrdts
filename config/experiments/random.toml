@@ -1,0 +1,12 @@
+[experiment]
+name = "random"
+method_config = "config/methods/random.toml"
+# 正式实验唯一的总随机种子：控制固定场景、随机 DAG、飞行与调度。
+# 同一实验内区域和用户位置不随回合变化；每回合 UAV 重置，DAG 与策略随机流更新。
+seed = 42
+episodes = 2
+slots = 200
+users = 100
+dag_nodes = 10
+output_root = "results"
+device = "cuda"
