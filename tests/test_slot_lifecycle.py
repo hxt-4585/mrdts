@@ -47,6 +47,77 @@ class TestSlotLifecycle(unittest.TestCase):
             epoch_start=runtime.now,
         )[0]
 
+    def _prepare_region_crossing(self):
+        grid = self.region.region_map
+        row, column = np.argwhere(grid[:, :-1] != grid[:, 1:])[0]
+        source, target = int(grid[row, column]), int(grid[row, column + 1])
+        member_id = int(self.environment.member_ids_in_region(source)[0])
+        self.assertGreater(self.members.region_member_counts[source - 1], 1)
+        cell_size = self.region.config.cell_size
+        self.members.positions[member_id, :2] = (
+            (column + 1) * cell_size - 1.0, (row + 0.5) * cell_size
+        )
+        self.actions[member_id, 0] = 2.0 / (
+            self.members.config.max_horizontal_speed * self.members.config.flight_duration
+        )
+        return member_id, source, target
+
+    def test_migration_updates_region_counts_and_return_flight_restores_them(self):
+        member_id, source, target = self._prepare_region_crossing()
+        initial_counts = self.members.region_member_counts.copy()
+        expected = initial_counts.copy()
+        expected[source - 1] -= 1
+        expected[target - 1] += 1
+
+        self._begin()
+        self.assertEqual(self.members.region_ids[member_id], target)
+        np.testing.assert_array_equal(self.members.region_member_counts, expected)
+        self.assertEqual(self.members.region_member_counts.sum(), self.members.member_uav_count)
+        self.environment.end_slot()
+
+        self.actions *= -1
+        self._begin()
+        self.assertEqual(self.members.region_ids[member_id], source)
+        np.testing.assert_array_equal(self.members.region_member_counts, initial_counts)
+        self.environment.end_slot()
+
+    def test_refresh_keeps_zero_count_for_empty_last_region(self):
+        last_region = self.region.config.region_count
+        departing = self.environment.member_ids_in_region(last_region)
+        destination = self.environment.member_ids_in_region(1)[0]
+        self.members.positions[departing] = self.members.positions[destination]
+        expected = self.members.region_member_counts.copy()
+        expected[0] += expected[-1]
+        expected[-1] = 0
+        users = self.users.positions[self.users.region_ids != last_region]
+
+        self.environment.refresh_slot_topology(self.region, users)
+
+        np.testing.assert_array_equal(self.members.region_member_counts, expected)
+        self.assertEqual(self.members.region_member_counts.sum(), self.members.member_uav_count)
+
+    def test_runtime_creation_failure_rolls_back_migration_counts(self):
+        _, source, target = self._prepare_region_crossing()
+        positions = self.members.positions.copy()
+        regions = self.members.region_ids.copy()
+        counts = self.members.region_member_counts.copy()
+        expected = counts.copy()
+        expected[source - 1] -= 1
+        expected[target - 1] += 1
+
+        def fail_after_topology(*args, **kwargs):
+            np.testing.assert_array_equal(self.members.region_member_counts, expected)
+            raise RuntimeError("runtime creation failed")
+
+        with patch.object(self.environment, "create_scheduling_runtime", side_effect=fail_after_topology):
+            with self.assertRaisesRegex(RuntimeError, "runtime creation failed"):
+                self._begin()
+
+        self.assertIsNone(self.environment.runtime)
+        np.testing.assert_array_equal(self.members.positions, positions)
+        np.testing.assert_array_equal(self.members.region_ids, regions)
+        np.testing.assert_array_equal(self.members.region_member_counts, counts)
+
     def test_begin_refreshes_topology_before_creating_runtime(self):
         original_create = self.environment.create_scheduling_runtime
 

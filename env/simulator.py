@@ -198,5 +198,8 @@ class Simulator:
             associations[user_id] = candidates[int(np.argmin(horizontal_distances))]
 
         self.members.update_region_ids(member_ids, member_region_ids)
+        self.members.region_member_counts[:] = np.bincount(
+            member_region_ids, minlength=region.config.region_count + 1
+        )[1:]
         self.user_member_ids = associations
         return associations.copy()
