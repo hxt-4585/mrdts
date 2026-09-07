@@ -120,7 +120,7 @@ class TestERSRuntime(unittest.TestCase):
 
     def test_zero_payload_keeps_dependencies_without_transfer_jobs(self):
         runtime, ground, member, bs = make_runtime()
-        request = DAGRequest(0, make_dag(input_kb=0., edge_kb=0.), member, ground)
+        request = DAGRequest(0, make_dag(input_kbit=0., edge_kbit=0.), member, ground)
         keys = request.task_keys
         runtime.submit_dags([request], {keys[0]: PlacementDecision(ground, 0),
                                         keys[1]: PlacementDecision(bs, 1)}, runtime.now)

@@ -239,7 +239,7 @@ class SchedulingRuntime:
                 execution_node=decision.execution_node,
                 priority_seq=global_priority[key],
                 cpu_cycles=float(dag.node_features[node, 1]),
-                input_bits=float(dag.node_features[node, 0]) * 8.0 * 1024.0,
+                input_bits=float(dag.node_features[node, 0]) * 1000.0,
                 predecessors={node_keys[parent] for parent in predecessors[node]},
             )
         for node, key in node_keys.items():
@@ -258,7 +258,7 @@ class SchedulingRuntime:
         for parent, child in dag.edges:
             parent_task = prepared.tasks[node_keys[parent]]
             child_task = prepared.tasks[node_keys[child]]
-            result_bits = float(dag.edge_features[(parent, child)]) * 8.0 * 1024.0
+            result_bits = float(dag.edge_features[(parent, child)]) * 1000.0
             route = self.route_planner.predecessor_route(
                 parent_task.execution_node,
                 child_task.execution_node,

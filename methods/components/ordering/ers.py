@@ -145,4 +145,5 @@ class ERS:
         return AverageCosts(
             locations.candidates, dict(locations.paths),
             {node: float(features[node, 1]) * locations.seconds_per_cycle for node in range(dag.node_num)},
-            {edge: float(size) * 8192. * locations.seconds_per_bit for edge, size in dag.edge_features.items()})
+            {edge: float(size) * 1000.0 * locations.seconds_per_bit
+             for edge, size in dag.edge_features.items()})

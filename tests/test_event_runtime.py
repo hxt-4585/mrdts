@@ -53,6 +53,42 @@ class TestSchedulingRuntime(unittest.TestCase):
             edge_features={(0, 1): 1.0},
         )
 
+    def test_workload_sizes_are_decimal_kbit(self):
+        dag = DAG(
+            node_num=2,
+            edges=[(0, 1)],
+            node_features=np.array([[1.0, 1e7], [0.0, 1e7]]),
+            edge_features={(0, 1): 1.0},
+        )
+        keys = self.runtime.submit_dag(
+            dag_id=6,
+            dag=dag,
+            owner_member=self.member,
+            ground_device=self.ground,
+            placements={
+                0: PlacementDecision(self.member, priority_seq=0),
+                1: PlacementDecision(self.bs, priority_seq=1),
+            },
+            epoch_start=0.0,
+        )
+
+        parent = self.runtime.trace(keys[0])
+        child = self.runtime.trace(keys[1])
+        input_hop = DirectedChannelKey(self.ground, self.member)
+        edge_hop = DirectedChannelKey(self.member, self.bs)
+        edge_transfer_id = child.predecessor_records[parent.key].transfer_ids[0]
+        edge_job = self.runtime.channel_state(edge_hop)._jobs[edge_transfer_id]
+
+        self.assertEqual(parent.input_bits, 1000.0)
+        self.assertAlmostEqual(
+            self.runtime.channel_state(input_hop).active.duration_s,
+            self.runtime.transfer_duration_s(input_hop, 1000.0),
+        )
+        self.assertAlmostEqual(
+            edge_job.duration_s,
+            self.runtime.transfer_duration_s(edge_hop, 1000.0),
+        )
+
     def test_relayed_inputs_and_local_predecessor_enable_fifo_computation(self):
         keys = self.runtime.submit_dag(
             dag_id=7,
@@ -126,7 +162,7 @@ class TestSchedulingRuntime(unittest.TestCase):
 
         second = self.runtime.channel_state(key).active
         expected_duration = self.runtime.channel_model.transmission_delay_s(
-            data_size_bits=8.0 * 1024.0,
+            data_size_bits=1000.0,
             transmitter=self.runtime.entity_positions[self.ground],
             receiver=post_flight_position,
             transmit_power_w=1.0,

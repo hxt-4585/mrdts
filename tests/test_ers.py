@@ -36,10 +36,10 @@ def make_runtime(*, asymmetric=False):
     return runtime, ground, member, bs
 
 
-def make_dag(cycles=(1e8, 1e8), input_kb=1e6 / 8192, edge_kb=1e6 / 8192):
+def make_dag(cycles=(1e8, 1e8), input_kbit=1000.0, edge_kbit=1000.0):
     edges = [(i, i + 1) for i in range(len(cycles) - 1)]
-    return DAG(len(cycles), edges, np.array([[input_kb, c] for c in cycles]),
-               {edge: edge_kb for edge in edges})
+    return DAG(len(cycles), edges, np.array([[input_kbit, c] for c in cycles]),
+               {edge: edge_kbit for edge in edges})
 
 
 class TestERS(unittest.TestCase):
@@ -66,19 +66,19 @@ class TestERS(unittest.TestCase):
         for node in costs.candidates:
             self.assertEqual(costs.path_seconds_per_bit[node, node], 0.)
 
-    def test_asymmetric_routes_and_kb_to_bits(self):
+    def test_asymmetric_routes_and_kbit_to_bits(self):
         runtime, ground, member, bs = make_runtime(asymmetric=True)
-        costs = ERS(runtime).average_costs(DAGRequest(0, make_dag(edge_kb=1.), member, ground))
+        costs = ERS(runtime).average_costs(DAGRequest(0, make_dag(edge_kbit=1.), member, ground))
 
         self.assertAlmostEqual(costs.path_seconds_per_bit[ground, bs] * 1e6, .06)
         self.assertAlmostEqual(costs.path_seconds_per_bit[bs, ground] * 1e6, .12)
-        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], 1.26 / 49 * 8192 / 1e6)
+        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], 1.26 / 49 * 1000 / 1e6)
 
     def test_input_size_does_not_change_ranks(self):
         runtime, ground, member, _ = make_runtime()
         ers = ERS(runtime)
-        first = ers.plan([DAGRequest(0, make_dag(input_kb=1.), member, ground)])
-        large = ers.plan([DAGRequest(0, make_dag(input_kb=1e6), member, ground)])
+        first = ers.plan([DAGRequest(0, make_dag(input_kbit=1.), member, ground)])
+        large = ers.plan([DAGRequest(0, make_dag(input_kbit=1e6), member, ground)])
         self.assertEqual(first.ranks, large.ranks)
         self.assertEqual(first.order, large.order)
         self.assertFalse(runtime.tasks)
