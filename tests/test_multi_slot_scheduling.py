@@ -181,12 +181,12 @@ class TestMultiSlotScheduling(unittest.TestCase):
         return candidates[int(self.rng.integers(len(candidates)))]
 
     def _small_dag(self):
-        input_kb = self.rng.uniform(1.0, 2.0, size=(3, 1))
+        input_kbit = self.rng.uniform(1.0, 2.0, size=(3, 1))
         cpu_cycles = self.rng.uniform(1e6, 3e6, size=(3, 1))
         return DAG(
             node_num=3,
             edges=[(0, 1), (0, 2)],
-            node_features=np.hstack((input_kb, cpu_cycles)),
+            node_features=np.hstack((input_kbit, cpu_cycles)),
             edge_features={(0, 1): 1.0, (0, 2): 1.0},
         )
 

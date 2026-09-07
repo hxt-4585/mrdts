@@ -54,7 +54,7 @@ class TestDAGGeneration(unittest.TestCase):
         for _ in range(20):
             dag = self.gen.generate_single_dag()
             self.assertEqual(dag.node_features.shape, (self.cfg.n, 2))
-            # 第 0 列：输入数据量 (KB)
+            # 第 0 列：输入数据量 (Kbit)
             self.assertTrue(
                 (dag.node_features[:, 0] >= self.cfg.input_data_range[0]).all()
                 and (dag.node_features[:, 0] <= self.cfg.input_data_range[1]).all()

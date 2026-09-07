@@ -9,9 +9,9 @@ rho = 1.0
 delta = 0.5
 
 [features]
-# 每个子任务原始输入数据量范围，单位：KB，闭区间。
+# 每个子任务原始输入数据量范围，单位：Kbit，闭区间。
 input_data_range = [100, 500]
 # 每个子任务计算量范围，单位：CPU cycles。
 cpu_range = [10000000.0, 100000000.0]
-# DAG 依赖边的中间结果数据量范围，单位：KB，闭区间。
+# DAG 依赖边的中间结果数据量范围，单位：Kbit，闭区间。
 intermediate_data_range = [100, 300]

@@ -63,10 +63,10 @@ def draw_single(dag, title, path):
     for i in range(dag.node_num):
         data = int(round(dag.node_features[i, 0]))
         cpu = dag.node_features[i, 1]
-        labels[i] = f"{i}\nd={data}KB\nc={cpu:.1e}"
+        labels[i] = f"{i}\nd={data} Kbit\nc={cpu:.1e}"
     nx.draw_networkx_labels(g, pos, ax=ax, labels=labels, font_size=7)
 
-    # 边标签：中间结果数据量 (KB)
+    # 边标签：中间结果数据量 (Kbit)
     edge_labels = {e: str(dag.edge_features[e]) for e in dag.edges}
     nx.draw_networkx_edge_labels(
         g, pos, ax=ax, edge_labels=edge_labels, font_size=6, font_color="crimson"

@@ -34,16 +34,16 @@ JSON 每个任务另含 `rank_s`、`average_compute_s`、`average_edge_comm_s`�
 
 ```powershell
 uv run python scripts/visualize_scheduling.py --region 2
-uv run python scripts/visualize_scheduling.py --load-scale 10 --output scripts/output/scheduling_replay_overload.html
+uv run python scripts/visualize_scheduling.py --load-scale 100 --output scripts/output/scheduling_replay_overload.html
 ```
 
-`--load-scale` 同时缩放原始输入、中间结果和 CPU cycles，保持拓扑、硬件和链路参数不变。默认各节点输入为 `[120, 70, 100, 80] KB`，计算量为 `[800, 90, 1600, 1800] M cycles`，四条依赖边结果为 `[35, 60, 40, 55] KB`。这些仅是脚本演示参数；不使用默认随机 DAG 负载，也不修改配置文件。
+`--load-scale` 同时缩放原始输入、中间结果和 CPU cycles，保持拓扑、硬件和链路参数不变。默认各节点输入为 `[120, 70, 100, 80] Kbit`，计算量为 `[800, 90, 1600, 1800] M cycles`，四条依赖边结果为 `[35, 60, 40, 55] Kbit`。这些仅是脚本演示参数；不使用默认随机 DAG 负载，也不修改配置文件。
 
 默认每区域只有一个 DAG，各节点分散在四个执行位置；可能没有计算排队。这是该场景的真实结果，不为展示而虚构排队。信道队列仍会等待源数据或前序传输，页面的“当前信道队首”可以查看。
 
 ## 已验证
 
 - 初版回放全量验证为 106 项通过；接入 ERS 后增加排序来源及成本递推的回归测试，全量结果见 ERS 实施记录。
-- 默认 4 个 DAG 全部完成；10 倍负载下 4 个 DAG 全部截止失败。
+- 默认 4 个 DAG 全部完成；100 倍负载下 4 个 DAG 全部截止失败。
 - 浏览器检查区域切换、节点高亮、共享 BS 核心记录、逐事件前进、播放、时间拖动、重置和过载截止显示，未发现脚本错误。
 - `scripts/output/` 已由项目现有 `.gitignore` 忽略；生成的 HTML/JSON 不纳入 Git，可通过上述命令重新生成。

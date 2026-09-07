@@ -27,17 +27,17 @@
 - Consumes: `DAG.node_features[:, 0]` and `DAG.edge_features[(parent, child)]`, both expressed in Kbit.
 - Produces: `TaskRuntime.input_bits` and transfer payloads expressed in bit.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Update the two-hop runtime test to calculate the expected one-hop duration from exactly `1000` bits and assert that a `1.0` Kbit node input and edge result each use that duration. Also assert `runtime.trace(key).input_bits == 1000.0`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run python -m unittest tests.test_event_runtime.TestSchedulingRuntime.test_relayed_inputs_and_local_predecessor_enable_fifo_computation -v`
 
 Expected: FAIL because the current runtime stores `8192.0` bits for a `1.0` workload value.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `_prepare_dag`, replace both conversions:
 
@@ -46,7 +46,7 @@ input_bits=float(dag.node_features[node, 0]) * 1000.0
 result_bits = float(dag.edge_features[(parent, child)]) * 1000.0
 ```
 
-- [ ] **Step 4: Run focused runtime tests**
+- [x] **Step 4: Run focused runtime tests**
 
 Run: `uv run python -m unittest tests.test_event_runtime tests.test_ers_runtime -v`
 
@@ -62,17 +62,17 @@ Expected: runtime Kbit assertions pass; ERS expectations may still fail until Ta
 - Consumes: `DAG.edge_features` in Kbit and `_LocationCosts.seconds_per_bit` in seconds per bit.
 - Produces: `AverageCosts.average_edge_comm_s` in seconds.
 
-- [ ] **Step 1: Write the failing ERS test**
+- [x] **Step 1: Write the failing ERS test**
 
 Rename Kbit-oriented test helpers and make a `1000` Kbit edge represent `1e6` bits. For a `1.0` Kbit edge, assert the average communication formula is multiplied by `1000 / 1e6`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run python -m unittest tests.test_ers.TestERS.test_asymmetric_routes_and_kbit_to_bits -v`
 
 Expected: FAIL because ERS still multiplies edge sizes by `8192`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Use decimal Kbit in `_task_costs`:
 
@@ -81,7 +81,7 @@ Use decimal Kbit in `_task_costs`:
  for edge, size in dag.edge_features.items()}
 ```
 
-- [ ] **Step 4: Run focused scheduling tests**
+- [x] **Step 4: Run focused scheduling tests**
 
 Run: `uv run python -m unittest tests.test_ers tests.test_ers_runtime tests.test_event_runtime -v`
 
@@ -104,23 +104,23 @@ Expected: PASS.
 **Interfaces:**
 - Consumes and produces no new runtime API; this task aligns labels with the established Kbit contract.
 
-- [ ] **Step 1: Replace workload unit labels**
+- [x] **Step 1: Replace workload unit labels**
 
 Change `KB` to `Kbit`, rename local display/helper fields such as `input_kb` and `edge_kb` to `input_kbit` and `edge_kbit`, and convert displayed runtime bits with `/ 1000`.
 
-- [ ] **Step 2: Scan for stale byte-based semantics**
+- [x] **Step 2: Scan for stale byte-based semantics**
 
 Run: `rg -n -i "\\bKB\\b|8192|1024\\s*\\*\\s*8|input_kb|edge_kb" . -g '!results/**' -g '!scripts/diagnostics/**' -g '!**/.git/**'`
 
 Expected: no stale workload-unit matches except historical wording explicitly describing the old conversion in the new design document.
 
-- [ ] **Step 3: Run the complete test suite**
+- [x] **Step 3: Run the complete test suite**
 
 Run: `uv run python -m unittest discover -s tests -v`
 
 Expected: all tests pass.
 
-- [ ] **Step 4: Check the final diff**
+- [x] **Step 4: Check the final diff**
 
 Run: `git diff --check` and `git status --short`.
 

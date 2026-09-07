@@ -24,8 +24,8 @@ class DAG:
         node_num: 子任务（节点）数量。
         edges: 依赖边列表，每条边为 (前驱节点, 后继节点)。
         node_features: 节点特征矩阵，shape=(node_num, 2)，
-                       第 0 列为输入数据量 (KB)，第 1 列为计算量 (CPU cycles)。
-        edge_features: 边特征字典，键为 (u, v)，值为前驱 u 传给后继 v 的中间结果数据量 (KB)。
+                       第 0 列为输入数据量 (Kbit)，第 1 列为计算量 (CPU cycles)。
+        edge_features: 边特征字典，键为 (u, v)，值为前驱 u 传给后继 v 的中间结果数据量 (Kbit)。
     """
 
     node_num: int
@@ -119,11 +119,11 @@ class DAGGenerator:
             node_num: 节点数量。
 
         Returns:
-            shape=(node_num, 2) 的特征矩阵，第 0 列为输入数据量 (KB)，
+            shape=(node_num, 2) 的特征矩阵，第 0 列为输入数据量 (Kbit)，
             第 1 列为计算量 (CPU cycles)。
         """
         cfg = self.config
-        # 输入数据量 (KB)：整数，[low, high] 闭区间均匀随机
+        # 输入数据量 (Kbit)：整数，[low, high] 闭区间均匀随机
         input_data = self._np_rng.integers(
             cfg.input_data_range[0], cfg.input_data_range[1] + 1, size=(node_num, 1)
         )
@@ -140,7 +140,7 @@ class DAGGenerator:
             edges: 依赖边列表。
 
         Returns:
-            以 (u, v) 为键、中间结果数据量 (KB) 为值的字典。
+            以 (u, v) 为键、中间结果数据量 (Kbit) 为值的字典。
         """
         cfg = self.config
         edge_features = {}

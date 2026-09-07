@@ -8,7 +8,7 @@
 - 每个核心等权。平均计算时间为 `sum(C_i / f_pk) / sum(K_p)`，一个任务只使用一个核心。
 - 复用运行时 RoutePlanner 和信道速率计算；路径每比特时间为各跳 `1 / R_ab` 之和。
 - 依赖边平均时间为 `D_ij * sum(K_p * K_q * path_s_per_bit[p,q]) / sum(K_p)^2`，包含同设备成本为零的组合。
-- 原始输入和边数据单位沿用项目 KB，转换为 `KB * 1024 * 8` bit。输入上传只进入实际执行时间。
+- 原始输入和边数据单位为十进制 Kbit，转换为 `Kbit * 1000` bit。输入上传只进入实际执行时间。
 - `rank[i] = compute[i] + max(comm[i,j] + rank[j])`。使用迭代拓扑计算，拒绝环和无效成本；同 rank 时仍保持前驱优先。
 - 同一 owner 的全部 DAG 合并排序，保留 `(owner, user, dag, node)` 身份。不同 owner 的列表以 `(-rank, owner, user, dag, topological_position)` 稳定合并，供共享 BS 和信道使用；不改变各 owner 内部次序。
 - 一次规划内缓存各有向跳及用户的路径矩阵。重新规划时重新读取当前拓扑，避免跨时隙或飞行后使用过期成本。

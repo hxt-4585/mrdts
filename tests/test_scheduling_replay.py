@@ -27,12 +27,15 @@ class TestSchedulingReplay(unittest.TestCase):
             ground = next(e for e in entities if e["kind"] == "ground_device")
             self.assertEqual(ground["frequencies_hz"], [1e9])
             local = next(t for t in tasks if t["node"] == 1)
+            self.assertIn("input_kbit", local)
+            self.assertNotIn("input_kb", local)
             self.assertEqual(local["input_arrival"], 0.0)
             self.assertEqual(local["compute_energy_j"], 0.0)
             self.assertAlmostEqual(local["finish"] - local["start"], local["cycles"] / 1e9)
             self.assertFalse(any(x["task"] == local["id"] and x["kind"] == "input"
                                  for x in data["transfers"]))
             dag = next(d for d in data["dags"] if d["region"] == region)
+            self.assertTrue(all("kbit" in edge and "kb" not in edge for edge in dag["edges"]))
             ground_result = sorted(
                 (x for x in data["transfers"] if x["task"] == tasks[3]["id"]
                  and x["predecessor"] == local["id"]), key=lambda x: x["hop"])
@@ -69,7 +72,7 @@ class TestSchedulingReplay(unittest.TestCase):
             self.assertAlmostEqual(task["rank_s"], task["average_compute_s"] + tail)
 
     def test_overload_does_not_report_planned_completion_as_actual_completion(self):
-        data = self.build(load_scale=10.0)
+        data = self.build(load_scale=100.0)
         deadline = data["meta"]["deadline"]
         self.assertGreater(data["summary"]["failed_dags"], 0)
         truncated = [x for x in data["transfers"] if x["start"] is not None and not x["completed"]]

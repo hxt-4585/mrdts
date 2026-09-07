@@ -39,10 +39,10 @@ class TestSlotLifecycle(unittest.TestCase):
         self.environment.begin_slot(self.region, self.users.positions, self.actions)
         return self.environment.runtime
 
-    def _submit(self, runtime, dag_id=0, cycles=1e7, input_kb=1.0, execution=None):
+    def _submit(self, runtime, dag_id=0, cycles=1e7, input_kbit=1.0, execution=None):
         owner = runtime.ground_owner_members[self.ground]
         return runtime.submit_dag(
-            dag_id, DAG(1, [], np.array([[input_kb, cycles]]), {}),
+            dag_id, DAG(1, [], np.array([[input_kbit, cycles]]), {}),
             owner, self.ground, {0: PlacementDecision(execution or self.ground, 0)},
             epoch_start=runtime.now,
         )[0]

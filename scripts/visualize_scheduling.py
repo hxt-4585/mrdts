@@ -110,7 +110,7 @@ def build_replay(load_scale=1.0, initial_region=1):
         dag_definitions.append(dict(id=f"d{user_index}", label=f"DAG {user_index}",
                                     region=int(region_id), ground=entity_id(ground), owner=entity_id(owner),
                                     peer=f"m{peer_id}", edges=[dict(source=f"d{user_index}-t{a}",
-                                    target=f"d{user_index}-t{b}", kb=dag.edge_features[(a, b)]) for a, b in edges]))
+                                    target=f"d{user_index}-t{b}", kbit=dag.edge_features[(a, b)]) for a, b in edges]))
 
     plan = ERS(runtime).plan(requests)
     runtime.submit_dags(requests, {key: PlacementDecision(execution_nodes[key], seq)
@@ -139,7 +139,7 @@ def build_replay(load_scale=1.0, initial_region=1):
                           rank_s=plan.ranks[key], average_compute_s=costs.average_compute_s[key.node_id],
                           average_edge_comm_s={str(child): value for (parent, child), value
                                                in costs.average_edge_comm_s.items() if parent == key.node_id},
-                          input_kb=task.input_bits / 8192, cycles=task.cpu_cycles,
+                          input_kbit=task.input_bits / 1000.0, cycles=task.cpu_cycles,
                           predecessors=[task_id(k) for k in sorted(task.predecessors)],
                           input_arrival=task.input_arrival_at, ready=task.data_ready_at,
                           queued=task.compute_queue_enter_at, start=task.compute_start_at,
