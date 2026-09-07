@@ -93,7 +93,7 @@ Expected: PASS.
 - Modify: `config/dag.toml`
 - Modify: `env/workload/dag_generator.py`
 - Modify: `specs/03_task_dag_model.md`
-- Modify: `docs/superpowers/specs/2026-09-03-ers-delay-design.md`
+- Modify: `specs/01_system_model.md`
 - Modify: `docs/superpowers/plans/2026-09-03-ers-delay.md`
 - Modify: `tests/test_dag_generation.py`
 - Modify: `scripts/visualize_dag.py`

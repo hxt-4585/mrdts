@@ -1,6 +1,6 @@
 # Master–Member UAV 强化学习：文献调研与框架建议
 
-日期：2026-09-04。项目基线：`7451d6c`。状态：供讨论的研究方案，未实施策略或训练代码。
+日期：2026-09-04。状态：供讨论的研究方案，未实施策略或训练代码；其中项目事实以当前规范和实现为准。
 
 ## 1. 结论与适用前提
 
@@ -14,7 +14,7 @@
 
 ## 2. 项目实际问题：变化的是哪些维度
 
-依据当前 `specs/01_system_model.md`、`env/simulator.py`、`env/types.py`、`methods/ers.py` 和配置：
+依据当前 `specs/01_system_model.md`、`env/simulator.py`、`env/types.py`、`methods/components/ordering/ers.py` 和配置：
 
 | 对象 | 已确定的项目语义 | 对算法设计的影响 |
 |---|---|---|

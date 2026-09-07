@@ -108,9 +108,9 @@ Member UAV 完成移动并更新区域归属后，每个地面设备与本区域
 
 方案生成时可以按 ERS 顺序逐个选择子任务的执行位置，无需等待任何子任务实际传输或计算完成。DAG 提交后，各子任务的执行位置固定，由运行时模拟依赖等待、数据传输、排队和计算；后继子任务的数据就绪事件不再触发执行位置决策。
 
-当前 `methods/ers.py` 的 `ERS(runtime).plan(requests)` 仅以时延计算向上 rank。计算成本按候选核心等权平均；依赖通信成本先累加合法中继路径的各跳时间，再按源、目标设备的核心数乘积加权平均，包含同设备通信为零的组合。自身输入上传不进入 rank，仍完整影响实际数据就绪时间。成本不含队列等待，也不引入能量虚拟队列。
+当前 `methods/components/ordering/ers.py` 的 `ERS(runtime).plan(requests)` 仅以时延计算向上 rank。计算成本按候选核心等权平均；依赖通信成本先累加合法中继路径的各跳时间，再按源、目标设备的核心数乘积加权平均，包含同设备通信为零的组合。自身输入上传不进入 rank，仍完整影响实际数据就绪时间。成本不含队列等待，也不引入能量虚拟队列。
 
-运行时通过 `submit_dags(requests, placements, epoch_start)` 整批预备、按统一序号入队后才开始派发。同一时隙多个 Member 的顺序按 rank 和稳定身份规则合并以共享 BS；各 Member 内部次序保持不变。单 DAG 可使用 `submit_dag`，但逐 DAG 提交不构成统一批次。公式、返回值和调用示例见 `docs/superpowers/specs/2026-09-03-ers-delay-design.md`。
+运行时通过 `submit_dags(requests, placements, epoch_start)` 整批预备、按统一序号入队后才开始派发。同一时隙多个 Member 的顺序按 rank 和稳定身份规则合并以共享 BS；各 Member 内部次序保持不变。单 DAG 可使用 `submit_dag`，但逐 DAG 提交不构成统一批次。
 
 对于每个子任务，Member UAV 的执行位置动作空间只包含：任务所属地面设备、本区域 Member UAV 和全局 BS。任务所属地面设备以外的其他地面设备不属于候选执行节点。
 
