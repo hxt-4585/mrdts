@@ -16,6 +16,9 @@ def main(argv=None):
     parser, args, config = parse_config(argv, training=True)
     try:
         if args.check:
+            if config.method['solution'] == 'ppo_delay':
+                from methods.solutions.ppo_delay.settings import TrainingSettings
+                TrainingSettings.from_config(config)
             streams = RandomStreams.from_config(config)
             create_method(config.method, flight_rng=streams.flight, scheduling_rng=streams.scheduling)
             device, details = check_device(config.device)

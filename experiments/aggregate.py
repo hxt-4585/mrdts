@@ -17,7 +17,7 @@ def aggregate(root):
     rows = []
     for path in sorted(root.rglob("summary.json")):
         metadata = json.loads((path.parent / "metadata.json").read_text(encoding="utf-8"))
-        if metadata["status"] != "completed":
+        if metadata["status"] != "completed" or metadata.get('mode') != 'evaluate':
             continue
         summary = json.loads(path.read_text(encoding="utf-8"))
         rows.append(dict(method=metadata["method_id"], seed=metadata["seed"],

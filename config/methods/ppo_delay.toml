@@ -1,0 +1,7 @@
+[method]
+solution = "ppo_delay"
+
+[method.components]
+ordering = "ers"
+flight = "ppo_master"
+scheduling = "ppo_member"

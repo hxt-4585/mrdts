@@ -1,0 +1,24 @@
+[experiment]
+name = "ppo_delay"
+method_config = "config/methods/ppo_delay.toml"
+seed = 42
+# Total training epochs = training.member_epochs + training.master_epochs.
+episodes = 130
+slots = 500
+users = 100
+dag_nodes = 10
+output_root = "results"
+# Explicit CPU works on the current workstation; use --device cuda on a supported host.
+device = "cpu"
+
+[training]
+member_epochs = 100
+master_epochs = 30
+update_every_steps = 8
+eval_steps = 500
+test_steps = 500
+eval_every = 10
+hidden = 64
+ppo_epochs = 4
+threads = 1
+log_every_steps = 25

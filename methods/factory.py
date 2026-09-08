@@ -13,18 +13,59 @@ ORDERINGS = {"ers": ERSOrdering}
 FLIGHTS = {"stationary": lambda rng: StationaryFlight(), "random": RandomFlight}
 SCHEDULERS = {"local": lambda rng: LocalScheduling(), "owner": lambda rng: OwnerScheduling(),
               "random": RandomScheduling}
-SOLUTIONS = {"random": build_method}
-# 接入具体算法时显式注册 Trainer 类，不把评估循环伪装成训练。
-TRAINERS = {}
+def ppo_flight(rng):
+    from methods.components.flight.ppo import PPOFlight
+    return PPOFlight()
 
 
-def create_method(config, *, flight_rng, scheduling_rng):
+def ppo_scheduling(rng):
+    from methods.components.scheduling.ppo import PPOScheduling
+    return PPOScheduling()
+
+
+def ppo_method(ordering, flight, scheduling):
+    from methods.solutions.ppo_delay.method import build_method
+    return build_method(ordering, flight, scheduling)
+
+
+def ppo_trainer():
+    from methods.solutions.ppo_delay.trainer import PPODelayTrainer
+    return PPODelayTrainer()
+
+
+FLIGHTS['ppo_master'] = ppo_flight
+SCHEDULERS['ppo_member'] = ppo_scheduling
+SOLUTIONS = {"random": build_method, "ppo_delay": ppo_method}
+TRAINERS = {'ppo_delay': ppo_trainer}
+
+
+def validate_method(config):
+    try:
+        solution, components = config['solution'], config['components']
+        if solution not in SOLUTIONS:
+            raise ValueError(f'Unknown solution: {solution}')
+        for key, registry in (('ordering', ORDERINGS), ('flight', FLIGHTS), ('scheduling', SCHEDULERS)):
+            if components[key] not in registry:
+                raise ValueError(f'Unknown {key}: {components[key]}')
+        if solution == 'ppo_delay' and components != dict(ordering='ers', flight='ppo_master', scheduling='ppo_member'):
+            raise ValueError('ppo_delay requires ers / ppo_master / ppo_member')
+        if solution == 'random' and (components['flight'] == 'ppo_master' or components['scheduling'] == 'ppo_member'):
+            raise ValueError('Learned PPO components require the ppo_delay observation context')
+    except KeyError as exc:
+        raise ValueError(f'Missing method/component: {exc}') from exc
+
+
+def create_method(config, *, flight_rng, scheduling_rng, checkpoint=None, device='cpu'):
+    validate_method(config)
     try:
         components = config["components"]
-        return SOLUTIONS[config["solution"]](
+        method = SOLUTIONS[config["solution"]](
             ORDERINGS[components["ordering"]](),
             FLIGHTS[components["flight"]](flight_rng),
             SCHEDULERS[components["scheduling"]](scheduling_rng))
+        if config['solution'] == 'ppo_delay':
+            method.checkpoint, method.device = checkpoint, device
+        return method
     except KeyError as exc:
         raise ValueError(f"Unknown or missing method/component: {exc}") from exc
 
