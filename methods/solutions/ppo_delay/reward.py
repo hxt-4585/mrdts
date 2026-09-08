@@ -13,5 +13,3 @@ def delay_metrics(result: SlotResult) -> dict[str, float]:
     return dict(mean_delay_s=mean_delay, reward=-mean_delay / horizon,
                 failure_rate=sum(d.failed for d in result.dags) / len(result.dags),
                 max_delay_s=float(max(delays)))
-
-

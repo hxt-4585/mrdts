@@ -52,6 +52,9 @@ def _draw_losses(figure, axes, data):
             if rows:
                 axis.plot([row.update for row in rows], [getattr(row, field) for row in rows],
                           color=colour, marker=".", label=stage)
+        if field == "value_loss":
+            axis.set_yscale("symlog", linthresh=1e-4)
+            title += " (symlog)"
         axis.set_title(title)
         finish_axis(axis, "Update")
     from .training import mark_stage_switches

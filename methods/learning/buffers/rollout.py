@@ -11,5 +11,3 @@ class Rollout:
     critic_observations: np.ndarray
     values: np.ndarray
     returns: np.ndarray
-
-

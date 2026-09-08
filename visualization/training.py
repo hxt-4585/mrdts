@@ -38,6 +38,7 @@ def _plot_stage_series(axis, rows, field, *, label_prefix="Training"):
         if len(selected) >= 5:
             smooth = stage_smooth([row.stage for row in selected], values)
             axis.plot(x[4:], smooth[4:], color=colour, linewidth=1.7,
+                      marker="." if len(selected) == 5 else None,
                       label=f"{label_prefix} {stage} smoothed")
 
 
@@ -94,7 +95,11 @@ def losses_figure(data: RunData):
                 axis.plot(x, values, color=colour, alpha=.35, marker=".", label=f"{stage} raw")
                 if len(rows) >= 5:
                     axis.plot(x[4:], stage_smooth([row.stage for row in rows], values)[4:], color=colour,
+                              marker="." if len(rows) == 5 else None,
                               linewidth=1.7, label=f"{stage} smoothed")
+        if field == "value_loss":
+            axis.set_yscale("symlog", linthresh=1e-4)
+            title += " (symlog)"
         axis.set_title(title)
         axis.set_ylabel(field.replace("_", " ").title())
         finish_axis(axis, "Update")

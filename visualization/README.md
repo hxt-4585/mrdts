@@ -12,7 +12,9 @@ Export publication-friendly offline figures:
 The default output is `<run>/figures/training/`. Reward, loss, and PPO diagnostic figures
 are written as PNG, SVG, and PDF, with every plotted input row in `source.csv`. Raw training
 points remain visible; the trailing mean restarts at each Member/Master stage boundary.
-Validation points are shown separately. Use `--output <directory>` to choose another target.
+Validation points are shown separately. Value loss uses a symlog scale (linear within
+±0.0001) so both Member and Master losses remain visible despite different return scales.
+Use `--output <directory>` to choose another target.
 
 Open an independent live reward and loss monitor:
 

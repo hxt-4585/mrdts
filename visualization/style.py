@@ -19,4 +19,3 @@ def apply_style():
 def finish_axis(axis, xlabel):
     axis.set_xlabel(xlabel)
     axis.grid(axis="y", linewidth=.5, alpha=.2)
-

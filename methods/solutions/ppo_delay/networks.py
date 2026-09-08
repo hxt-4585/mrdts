@@ -48,5 +48,3 @@ class MasterActor(nn.Module):
     def evaluate(self, observations, mask, latent):
         dist = self.distribution(observations)
         return (dist.log_prob(latent) * mask).sum(-1), (dist.entropy() * mask).sum(-1)
-
-
