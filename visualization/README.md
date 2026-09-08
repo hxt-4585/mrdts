@@ -16,6 +16,18 @@ Validation points are shown separately. Value loss uses a symlog scale (linear w
 ±0.0001) so both Member and Master losses remain visible despite different return scales.
 Use `--output <directory>` to choose another target.
 
+The code directory `visualization/` contains no generated figures by default. For PPO,
+`<run>` is `results/ppo_delay/runs/ppo_delay_ers_ppo_ppo/seed_<seed>/<timestamp_ID>/`.
+
+| Input file under `<run>/training/` | Generated figure under `<run>/figures/training/` |
+|---|---|
+| `epochs.csv` and optional `validation.csv` | `epoch-reward.png/svg/pdf`: mean reward, epoch return and mean delay |
+| `updates.csv` | `losses.png/svg/pdf`: actor and value loss |
+| `updates.csv` | `diagnostics.png/svg/pdf`: KL and entropy |
+
+`config.json` and `metadata.json` provide seed and run labels. `source.csv` exports the
+plotted records; it is an output, not the input used to train or generate the plots.
+
 Open an independent live reward and loss monitor:
 
 ```powershell

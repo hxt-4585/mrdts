@@ -8,6 +8,7 @@ import subprocess
 import uuid
 
 from experiments.config import PROJECT_ROOT
+from methods.factory import COMPONENT_LABELS
 
 
 def write_json(path, data):
@@ -25,7 +26,7 @@ def git_output(*args):
 
 def create_run(config, mode, scenes):
     components = config.method["components"]
-    method_id = "_".join([config.method["solution"], *(components[name] for name in
+    method_id = "_".join([config.method["solution"], *(COMPONENT_LABELS.get(components[name], components[name]) for name in
                                                      ("ordering", "flight", "scheduling"))])
     # Component names are factory-validated before using them in output paths.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ") + "_" + uuid.uuid4().hex[:8]

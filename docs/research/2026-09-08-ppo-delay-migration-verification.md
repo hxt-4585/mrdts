@@ -26,7 +26,7 @@
 .venv/Scripts/python.exe -B -m experiments.train --config config/experiments/ppo_delay.toml --member-epochs 30 --master-epochs 5 --slots 8 --eval-steps 8 --test-steps 16 --eval-every 5 --device cpu
 ```
 
-运行目录：`results/ppo_delay/runs/ppo_delay_ers_ppo_master_ppo_member/seed_42/20260907T173334_390991Z_0fedc62e/`。
+运行目录：`results/ppo_delay/runs/ppo_delay_ers_ppo_ppo/seed_42/20260907T173334_390991Z_0fedc62e/`。
 
 | 固定验证集（ID 0，8 时隙） | 截断平均时延 / 秒 |
 |---|---:|
@@ -44,7 +44,7 @@
 | ERS + 原地停留 + 本地执行 | 0.5500116855 | 0 |
 | Random（ERS + 随机飞行 + 随机调度） | 0.4838021887 | 10 |
 
-训练目录的 `training/test.json` 与独立加载 checkpoint 的评估一致。配对运行详情保存在该目录的 `training/paired_check.json`，独立运行位于 `results/ppo_delay_check/`。这里仅为单 seed、固定布局、短任务流的工程验证，不能用来宣称多种子优势或新布局泛化。
+训练目录的 `training/test.json` 与独立加载 checkpoint 的评估一致。配对运行详情保存在该目录的 `training/paired_check.json`，独立评估运行现已并入 `results/ppo_delay/runs/`。这里仅为单 seed、固定布局、短任务流的工程验证，不能用来宣称多种子优势或新布局泛化。
 
 ## 长回合与产物检查
 
@@ -54,7 +54,7 @@
 .venv/Scripts/python.exe -B -m experiments.train --config config/experiments/ppo_delay.toml --member-epochs 1 --master-epochs 1 --slots 500 --eval-steps 4 --test-steps 16 --eval-every 1 --device cpu
 ```
 
-运行目录：`results/ppo_delay/runs/ppo_delay_ers_ppo_master_ppo_member/seed_42/20260908T020039_495610Z_82a519e8/`。运行正常完成：1000 条连续逐时隙记录，各阶段 slot_start 均为 0–499，训练任务流 ID 分别为 2、3；Member 63 次更新、Master 1 次更新，所有 loss/KL/entropy 有限。Master 阶段的 Member actor/critic 与选出的 Member checkpoint 逐位一致，Master 参数确实发生更新。
+运行目录：`results/ppo_delay/runs/ppo_delay_ers_ppo_ppo/seed_42/20260908T020039_495610Z_82a519e8/`。运行正常完成：1000 条连续逐时隙记录，各阶段 slot_start 均为 0–499，训练任务流 ID 分别为 2、3；Member 63 次更新、Master 1 次更新，所有 loss/KL/entropy 有限。Master 阶段的 Member actor/critic 与选出的 Member checkpoint 逐位一致，Master 参数确实发生更新。
 
 | 指标 | 结果 |
 |---|---:|
@@ -77,3 +77,5 @@
 生成 reward/epoch return/时延、actor/value loss、KL/entropy 的 PNG/SVG/PDF 及 `source.csv`，并检查实际 reward 与 loss 图布局。保留原始点，5 点完整窗口后开始平滑，Member/Master 分段，验证数据单独显示；不同长度的总 return 不混比。Value loss 使用 symlog（绝对值 0.0001 以内为线性），保留两个阶段不同量级的变化。交互窗口模式实现了刷新，但本次未执行人工 GUI 操作验证。
 
 从项目外目录直接运行 `experiments/train.py --resume ... --check --device cpu` 也通过，确认 PyCharm 类入口与项目相对路径解析。随后实际执行不带 `--config` 的 `--resume latest.pt --device cpu`，自动恢复已完成的短程运行并重现保留测试 reward `-0.4504597411`。最终代码、使用说明和验证记录保存在开发分支；大量运行产物按现有规则不提交 Git。
+
+结果目录命名按后续要求简化为 `ppo_delay_ers_ppo_ppo`；原 `ppo_delay_check` 的配对运行已并入同一实验。移动保留原指标和 checkpoint，JSON 中的活动路径同步更新，metadata 记录原位置。Checkpoint 内的历史保存位置仍保留为来源记录，续训以传入的最新文件位置为准。

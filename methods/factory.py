@@ -38,6 +38,9 @@ SCHEDULERS['ppo_member'] = ppo_scheduling
 SOLUTIONS = {"random": build_method, "ppo_delay": ppo_method}
 TRAINERS = {'ppo_delay': ppo_trainer}
 
+# Result names identify algorithms; component roles are already given by their position.
+COMPONENT_LABELS = {'ppo_master': 'ppo', 'ppo_member': 'ppo'}
+
 
 def validate_method(config):
     try:

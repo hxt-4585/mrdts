@@ -32,7 +32,7 @@ class TestPPOExperiments(unittest.TestCase):
             from experiments.runner import evaluate
             path = PPODelayTrainer().train(config, torch.device('cpu'))
             self.assertEqual(path.parent.name, 'seed_42')
-            self.assertEqual(path.parent.parent.name, 'ppo_delay_ers_ppo_master_ppo_member')
+            self.assertEqual(path.parent.parent.name, 'ppo_delay_ers_ppo_ppo')
             self.assertEqual(json.loads((path/'metadata.json').read_text())['status'], 'completed')
             with (path/'training/epochs.csv').open() as stream:
                 epochs = list(csv.DictReader(stream))

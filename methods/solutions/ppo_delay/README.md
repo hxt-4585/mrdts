@@ -40,7 +40,7 @@ uv run python -m visualization.watch --run <run> --interval 2
 
 ## 输出
 
-与 Random 共用路径 `results/<实验名>/runs/<方案_组件>/seed_<seed>/<时间戳_ID>/`：
+与 Random 共用路径 `results/<实验名>/runs/<方案_排序_飞行算法_调度算法>/seed_<seed>/<时间戳_ID>/`。PPO 使用 `ppo_delay_ers_ppo_ppo`，目录只写算法名称，不附加 Master/Member 角色：
 
 ```text
 <run>/
