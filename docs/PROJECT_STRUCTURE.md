@@ -1,6 +1,6 @@
 # 项目目录与后续开发说明
 
-更新日期：2026-09-06。
+更新日期：2026-09-08。
 
 本文用于新对话或新开发者接手项目时了解目录职责、方案组织方式和已确认的实验行为。运行命令与安装说明见[根 README](../README.md)。参数以当前 TOML 为准，代码实现状态以实际文件及注册表为准；历史计划不代表当前实现。
 
@@ -8,7 +8,7 @@
 
 MRDTS 是多区域 UAV 的 DAG 子任务调度仿真与方法比较项目。一个完整方法通常由三个模块构成：子任务排序、Master UAV 飞行策略、Member UAV 子任务调度。需要支持多个文献 baseline、自提方案，以及组件替换实验；方法可以使用强化学习、启发式或优化算法。
 
-目前可运行的完整方法是 `random`：ERS 排序、随机飞行、随机调度。`proposed` 仅预留目录，尚未实现具体方案；训练入口、GPU 检查和 Trainer 接口已存在，但没有注册实际训练算法。
+目前可运行的完整方法为 `random`（ERS + 随机飞行 + 随机调度）和 `ppo_delay`（ERS + 连续 Master PPO + 共享 Member PPO）。后者已接入训练、续训和模型评估，只优化全局截断时延。`proposed` 仍为预留目录。
 
 `baseline` 是对比方法的统称，不是只容纳一个方法的固定名称。每个正式方案在 `methods/solutions/` 中拥有自己的目录，与 `random/`、`proposed/` 同级。旧的 `baseline` 方案和 `scheduling_ablation` 示例配置已经移除。
 
@@ -43,14 +43,16 @@ mrdts/
 │   │   └── scheduling/           Member 为子任务选择执行节点
 │   ├── solutions/                每个完整方案各占一个目录
 │   │   ├── random/               已实现：ERS + 随机飞行 + 随机调度
+│   │   ├── ppo_delay/            已实现：观测、奖励、采样、分阶段 PPO 训练器
 │   │   └── proposed/             预留：自提方案及其观测、奖励和训练器
 │   └── learning/                 可复用的学习支持代码
-│       ├── networks/             预留：共享网络结构
-│       ├── buffers/              预留：轨迹与经验缓存
-│       └── algorithms/           预留：共享学习更新算法
+│       ├── networks/             通用 MLP 与 ValueNetwork
+│       ├── buffers/              PPO 批量 Rollout 数据容器
+│       └── algorithms/           裁剪 PPO 与完整回合 GAE
 ├── experiments/                  正式评估、训练入口、记录和分析
 ├── data/
 │   └── scenarios/                预留：可复用场景与任务实例输入
+├── visualization/                独立训练绘图与实时监控，后续扩展分析图
 ├── results/                      正式实验输出，按实验与运行隔离
 ├── specs/                        系统、场景参数和 DAG 建模规范
 ├── docs/                         项目说明、研究资料和设计记录
@@ -94,11 +96,12 @@ mrdts/
 | `methods/compose.py` | 通用组合流程、组件输入、决策完整性和合法性检查 |
 | `methods/factory.py` | 注册排序/飞行/调度组件、完整方案和训练器，负责实例化 |
 | `methods/components/ordering/ers.py` | ERS 排序算法；`adapter.py` 将其接入组件接口 |
-| `methods/components/flight/` | `random` 随机飞行、`stationary` 原地停留组件 |
-| `methods/components/scheduling/` | `random` 随机合法节点、`local` 用户本地、`owner` 所属 Member 执行组件 |
+| `methods/components/flight/` | `random` 随机飞行、`stationary` 原地停留、`ppo_master` 张量策略组件 |
+| `methods/components/scheduling/` | `random` 随机合法节点、`local` 用户本地、`owner` 所属 Member、`ppo_member` 张量策略组件 |
 | `methods/solutions/random/method.py` | Random 的完整方案组合及飞行可行性筛选 |
 | `methods/solutions/proposed/` | 自提方案未来实现位置，目前仅说明文件 |
-| `methods/learning/device.py` | 检查 CPU/CUDA 设备；共享学习子目录目前仅预留 |
+| `methods/solutions/ppo_delay/` | 本方案观测、网络、奖励、统一执行与训练生命周期 |
+| `methods/learning/` | 可复用的 PPO、GAE、Rollout、MLP 与 CPU/CUDA 检查 |
 
 `local.py` 等组件文件的存在，不代表存在名为 Local 的完整 baseline。正式新增方案应同时具有完整方案实现、注册和配置。组件替换接口可以保留，但不要将未命名、未实现的组合描述成已有正式方案。
 
@@ -124,7 +127,7 @@ mrdts/
 
 ## 4. 已确认的回合、位置与随机规则
 
-代码中使用 `episode` 表示回合，`slot` 表示每回合的一步/时隙。当前 Random 是评估运行，没有训练 epoch 或参数更新。
+代码中使用 `episode` 表示回合，`slot` 表示每回合的一步/时隙。Random 是评估运行，没有训练 epoch 或参数更新。PPO 一个 epoch 对应一个完整物理回合，Member buffer 更新不重置场景；验证 ID 0、测试 ID 1、训练 ID 2 起。
 
 1. 所有回合使用相同区域划分与用户位置，用户在回合内也不移动。
 2. 每回合 UAV 重置到相同初始位置；Member UAV 在该回合内按策略连续移动，不继承上一回合的最终位置。
@@ -157,7 +160,7 @@ uv run python -m experiments.run
 uv run python -m experiments.run --config config/experiments/random.toml
 ```
 
-不传 `--config` 时读取 `experiments/config.py` 中的 `DEFAULT_CONFIG`。PyCharm 使用项目 `.venv/Scripts/python.exe`，直接运行 `experiments/run.py`；需要切换方案时在运行参数中填写 `--config ...`。需要训练的方法通过 `train.py` 启动，并先实现和注册自己的训练器。
+不传 `--config` 时读取 `experiments/config.py` 中的 `DEFAULT_CONFIG`。PyCharm 使用项目 `.venv/Scripts/python.exe`，直接运行 `experiments/run.py`；需要切换方案时在运行参数中填写 `--config ...`。需要训练的方法通过 `train.py` 启动，PPO 已注册训练器，使用 `--config config/experiments/ppo_delay.toml`。
 
 GPU torch 的依赖来源由 `pyproject.toml` 和 `uv.lock` 管理。NumPy 环境仿真和当前 Random 在 CPU 执行，PyTorch GPU 支持用于学习方法；`train.py --check` 成功不代表实现了训练算法。
 
@@ -178,7 +181,7 @@ results/<实验名>/
 └── analysis/                     调用汇总入口后生成比较 CSV
 ```
 
-训练方法以后按需在自己的运行目录保存 `checkpoints/`、`logs/` 等。新生成的 `config.json` 只在 `experiment.seed` 记录总 seed；旧结果保留当时的原始配置，不重写成新规则。
+PPO 已在同一运行目录保存 `checkpoints/` 与 `training/`（epochs、updates、validation、progress、test），图输出到 `figures/training/`。模型选优只使用验证集；独立 PPO 评估只允许保留的测试 ID 1。汇总工具只收集已完成的评估运行，排除训练。新生成的 `config.json` 只在 `experiment.seed` 记录总 seed；旧结果保留当时的原始配置，不重写成新规则。
 
 当前公共指标包括 DAG 完成/失败、成功 DAG 平均时延、失败按窗口长度计入的截断平均时延、计算/传输能耗，以及飞行违规、重采样和回退次数。计算/传输能耗包含失败任务在截止前的消耗；尚不包含 UAV 飞行能耗。
 
@@ -193,7 +196,9 @@ results/<实验名>/
 | 调整物理模型、通信规则、事件执行与结算 | `env/` 对应子模块，并同步 `specs/` |
 | 修改用户数量、运行预算、总 seed 或默认方案 | 实验 TOML；默认配置路径在 `experiments/config.py` |
 | 修改公共评价指标或结果格式 | `experiments/metrics.py`、`artifacts.py` 等 |
-| 新增正式汇总与绘图 | `experiments/`，输出到 `results/` |
+| 新增正式汇总与绘图 | 汇总放 `experiments/`，训练与后续分析绘图放 `visualization/`，输出到运行的 `figures/` |
 | 自动化回归验证与临时诊断 | `tests/` 与 `scripts/` |
 
 接手项目时，先阅读本文和根 README，再查看目标方案配置、`methods/factory.py` 及相关实现。修改前运行 `git status` 和 `git branch --show-current` 确认当前工作区，不依据历史交接记录推断分支或提交状态。目录职责或实验行为变化时同步本文；研究讨论、旧设计和旧结果应保留其历史语义。
+
+PPO 的源码来源、分阶段策略、输出字段和续训约束见 [方案说明](../methods/solutions/ppo_delay/README.md)，共享学习接口见 [learning 说明](../methods/learning/README.md)。PPO 推理组件接受本方案的张量上下文，与 Random 的启发式上下文不同；当前不允许直接混搭。
