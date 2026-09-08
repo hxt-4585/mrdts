@@ -19,17 +19,17 @@
 ## Task 1: Shared learning and method execution
 
 Files: methods/learning/{networks/mlp,buffers/rollout,algorithms/ppo}.py;
-methods/solutions/ppo_delay/{networks,observations,reward,method,rollout}.py;
-methods/components/{flight,scheduling}/ppo.py; tests/test_ppo_delay.py.
+methods/solutions/ppo/{networks,observations,reward,method,rollout}.py;
+methods/components/{flight,scheduling}/ppo.py; tests/test_ppo.py.
 
 - [x] Add tests for masked probabilities, Kbit features, legal complete plans, true terminals and staged updates; observe missing implementation failure.
 - [x] Extract source network/PPO code using `git show <source>:methods/rl_baseline/<file>`; retain formulas and settings, split generic types/helpers, add explicit tensor devices.
-- [x] Implement `PPODelayMethod.run_slot(scene, workload)` returning SlotOutcome and `Learner` + `run_epoch(scene, learner, stage, steps, update_every, on_step, on_update)` using the same method path.
-- [x] Verify with `.venv/Scripts/python.exe -B -m unittest discover -s tests -p test_ppo_delay.py` and compare source/new network outputs and PPO updates on identical synthetic samples.
+- [x] Implement `PPOMethod.run_slot(scene, workload)` returning SlotOutcome and `Learner` + `run_epoch(scene, learner, stage, steps, update_every, on_step, on_update)` using the same method path.
+- [x] Verify with `.venv/Scripts/python.exe -B -m unittest discover -s tests -p test_ppo.py` and compare source/new network outputs and PPO updates on identical synthetic samples.
 
 ## Task 2: Training, checkpoint and experiments
 
-Files: solution {trainer,checkpoint,settings,logs}.py; experiments/{cli,config,runner,train,aggregate}.py; methods/factory.py; config/{experiments,methods}/ppo_delay.toml; tests/test_ppo_experiments.py.
+Files: solution {trainer,checkpoint,settings,logs}.py; experiments/{cli,config,runner,train,aggregate}.py; methods/factory.py; config/{experiments,methods}/ppo.toml; tests/test_ppo_experiments.py.
 
 - [x] Test unique run layout, checkpoint evaluation, preserved Random behavior, split IDs and exact epoch-boundary resume.
 - [x] Implement Trainer.train(config, device), deterministic method loading, source-state schema validation, epoch/update/validation logging, latest/best selection and interruption reconciliation.

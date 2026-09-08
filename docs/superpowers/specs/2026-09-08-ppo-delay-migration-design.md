@@ -19,7 +19,7 @@ disjoint episode-ID ranges for validation/test/training without separate user se
 
 Generic PPO, rollout storage and MLP/value helpers belong in methods/learning.
 UAV/DAG observations, actors, rewards and training lifecycle belong to
-methods/solutions/ppo_delay. Flight/scheduling wrappers belong to methods/components.
+methods/solutions/ppo. Flight/scheduling wrappers belong to methods/components.
 Training and deployment share method execution. Register the method and Trainer;
 keep experiments.train/run as public entry points and support explicit CPU/CUDA.
 

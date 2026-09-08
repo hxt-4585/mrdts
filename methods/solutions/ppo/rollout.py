@@ -11,7 +11,7 @@ from methods.learning.algorithms.ppo import PPO, PPOSettings, gae_returns
 from methods.learning.buffers.rollout import Rollout
 from methods.components.flight.ppo import PPOFlight
 from methods.components.scheduling.ppo import PPOScheduling
-from .method import PPODelayMethod
+from .method import PPOMethod
 from .networks import MasterActor, MemberActor
 from .observations import MEMBER_FEATURES, MemberPlanning, central_state, master_observations
 
@@ -96,7 +96,7 @@ def run_epoch(scene, learner, *, stage, steps=500, update_every=8, on_step=None,
     """Consume a fresh scene without resetting it when a Member buffer is flushed."""
     if stage not in ('member', 'master', 'evaluation') or min(steps, update_every) < 1:
         raise ValueError('A valid stage and positive step counts are required')
-    method = PPODelayMethod(learner)
+    method = PPOMethod(learner)
     member_chunks, member_returns, master_chunks = [], [], []
     metrics, losses = [], []
     updates = {'member_updates': 0, 'master_updates': 0}

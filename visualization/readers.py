@@ -11,7 +11,6 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-STAGES = {"member", "master"}
 
 
 def project_path(path: str | Path) -> Path:
@@ -28,7 +27,7 @@ class EpochRow:
     total_steps: int
     epoch_return: float
     mean_reward: float
-    mean_delay_s: float
+    mean_delay_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -37,11 +36,8 @@ class UpdateRow:
     stage: str
     update: int
     total_steps: int
-    actor_loss: float
-    value_loss: float
-    approx_kl: float
-    entropy: float
-    early_stop: bool
+    metrics: dict[str, float]
+    early_stop: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -51,7 +47,7 @@ class ValidationRow:
     steps: int
     epoch_return: float
     mean_reward: float
-    mean_delay_s: float
+    mean_delay_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -86,26 +82,26 @@ def _required(row: dict[str, str], names: set[str], path: Path, line: int) -> No
         raise ValueError(f"Missing {', '.join(missing)} in {path} row {line}")
 
 
-def _finite(values: list[float], path: Path, line: int) -> None:
-    if not all(math.isfinite(value) for value in values):
+def _finite(values: list[float | None], path: Path, line: int) -> None:
+    if not all(value is None or math.isfinite(value) for value in values):
         raise ValueError(f"Values must be finite in {path} row {line}")
 
 
 def _parse_epoch(row: dict[str, str], path: Path, line: int, validation: bool) -> EpochRow:
-    names = {item.name for item in fields(EpochRow)}
+    names = {item.name for item in fields(EpochRow)} - {"mean_delay_s"}
     _required(row, names, path, line)
     try:
         parsed = EpochRow(
             epoch=int(row["epoch"]), stage=row["stage"], stage_epoch=int(row["stage_epoch"]),
             steps=int(row["steps"]), total_steps=int(row["total_steps"]),
             epoch_return=float(row["epoch_return"]), mean_reward=float(row["mean_reward"]),
-            mean_delay_s=float(row["mean_delay_s"]),
+            mean_delay_s=float(row["mean_delay_s"]) if row.get("mean_delay_s") else None,
         )
     except (TypeError, ValueError) as error:
         raise ValueError(f"Invalid numeric value in {path} row {line}") from error
     minimum_epoch = 0 if validation else 1
     if (parsed.epoch < minimum_epoch or parsed.stage_epoch < 0 or parsed.steps < 1
-            or parsed.total_steps < 0 or parsed.stage not in STAGES):
+            or parsed.total_steps < 0 or not parsed.stage.strip()):
         raise ValueError(f"Invalid epoch metadata in {path} row {line}")
     _finite([parsed.epoch_return, parsed.mean_reward, parsed.mean_delay_s], path, line)
     if not math.isclose(parsed.epoch_return, parsed.mean_reward * parsed.steps,
@@ -121,6 +117,8 @@ def _read_epoch_rows(path: str | Path) -> list[EpochRow]:
     for previous, current in zip(rows, rows[1:]):
         if current.epoch <= previous.epoch:
             raise ValueError(f"Epoch numbers must be strictly increasing in {path}")
+        if current.total_steps < previous.total_steps:
+            raise ValueError(f"Epoch total_steps must be increasing in {path}")
     return rows
 
 
@@ -130,7 +128,7 @@ def read_epochs(path: str | Path) -> list[EpochRow]:
 
 def read_validation(path: str | Path) -> list[ValidationRow]:
     path = Path(path)
-    names = {item.name for item in fields(ValidationRow)}
+    names = {item.name for item in fields(ValidationRow)} - {"mean_delay_s"}
     rows = []
     for line, row in enumerate(_complete_dict_rows(path), start=2):
         _required(row, names, path, line)
@@ -138,18 +136,18 @@ def read_validation(path: str | Path) -> list[ValidationRow]:
             item = ValidationRow(
                 epoch=int(row["epoch"]), stage=row["stage"], steps=int(row["steps"]),
                 epoch_return=float(row["epoch_return"]), mean_reward=float(row["mean_reward"]),
-                mean_delay_s=float(row["mean_delay_s"]),
+                mean_delay_s=float(row["mean_delay_s"]) if row.get("mean_delay_s") else None,
             )
         except (TypeError, ValueError) as error:
             raise ValueError(f"Invalid numeric value in {path} row {line}") from error
-        if item.epoch < 0 or item.steps < 1 or item.stage not in STAGES:
+        if item.epoch < 0 or item.steps < 1 or not item.stage.strip():
             raise ValueError(f"Invalid validation metadata in {path} row {line}")
         _finite([item.epoch_return, item.mean_reward, item.mean_delay_s], path, line)
         if not math.isclose(item.epoch_return, item.mean_reward * item.steps,
                             rel_tol=1e-7, abs_tol=1e-8):
             raise ValueError(f"Reward total is inconsistent in {path} row {line}")
         rows.append(item)
-    rank = {"member": 0, "master": 1}
+    rank = {stage: index for index, stage in enumerate(dict.fromkeys(row.stage for row in rows))}
     for previous, current in zip(rows, rows[1:]):
         if (current.epoch, rank[current.stage]) <= (previous.epoch, rank[previous.stage]):
             raise ValueError(f"Validation keys must be chronological in {path}")
@@ -165,24 +163,28 @@ def _parse_bool(value: str, path: Path, line: int) -> bool:
 
 def read_updates(path: str | Path) -> list[UpdateRow]:
     path = Path(path)
-    names = {item.name for item in fields(UpdateRow)}
+    names = {"epoch", "stage", "update", "total_steps"}
     parsed = []
     for line, row in enumerate(_complete_dict_rows(path), start=2):
         _required(row, names, path, line)
         try:
+            metrics = {name: float(value) for name, value in row.items()
+                       if name and (name == "loss" or name.endswith("_loss")
+                                    or name in {"approx_kl", "entropy"})
+                       and value not in (None, "")}
             item = UpdateRow(
                 epoch=int(row["epoch"]), stage=row["stage"], update=int(row["update"]),
-                total_steps=int(row["total_steps"]), actor_loss=float(row["actor_loss"]),
-                value_loss=float(row["value_loss"]), approx_kl=float(row["approx_kl"]),
-                entropy=float(row["entropy"]), early_stop=_parse_bool(row["early_stop"], path, line),
+                total_steps=int(row["total_steps"]), metrics=metrics,
+                early_stop=_parse_bool(row["early_stop"], path, line)
+                if row.get("early_stop") else None,
             )
         except (TypeError, ValueError) as error:
             if isinstance(error, ValueError) and "early_stop" in str(error):
                 raise
             raise ValueError(f"Invalid numeric value in {path} row {line}") from error
-        if item.epoch < 1 or item.update < 1 or item.total_steps < 0 or item.stage not in STAGES:
+        if item.epoch < 1 or item.update < 1 or item.total_steps < 0 or not item.stage.strip():
             raise ValueError(f"Invalid update metadata in {path} row {line}")
-        _finite([item.actor_loss, item.value_loss, item.approx_kl, item.entropy], path, line)
+        _finite(list(item.metrics.values()), path, line)
         parsed.append(item)
     for previous, current in zip(parsed, parsed[1:]):
         if (current.epoch, current.update) <= (previous.epoch, previous.update):

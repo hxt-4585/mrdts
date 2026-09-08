@@ -7,28 +7,11 @@ from experiments.artifacts import create_run, write_json
 from experiments.metrics import slot_metrics, summarize
 from experiments.randomness import RandomStreams
 from experiments.scene import build_scene, resolved_settings, settings_snapshot
-from methods.factory import create_method
+from methods.factory import create_method, validate_method
 
 
 def evaluate(config):
-    if config.checkpoint is not None and config.method['solution'] != 'ppo_delay':
-        raise ValueError('This method does not accept a checkpoint')
-    if config.method['solution'] == 'ppo_delay':
-        if config.checkpoint is None:
-            raise ValueError('PPO evaluation requires --checkpoint')
-        from methods.solutions.ppo_delay.checkpoint import read_checkpoint
-        from methods.solutions.ppo_delay.settings import environment_signature
-        from methods.learning.device import check_device
-        import json
-        state = read_checkpoint(config.checkpoint)
-        requested_ids = set(range(config.episode_start, config.episode_start + config.episodes))
-        test_ids = set(state['metadata']['signature']['splits']['test'])
-        if not requested_ids <= test_ids:
-            raise ValueError('PPO evaluation must use the held-out test split: --episodes 1 --episode-start 1')
-        actual = json.loads(json.dumps(environment_signature(config)))
-        if state['metadata']['signature']['environment'] != actual:
-            raise ValueError('Evaluation seed or physical configuration differs from the checkpoint')
-        check_device(config.device)
+    validate_method(config.method).validate_config(config, training=False)
     check_streams = RandomStreams.from_config(config)
     create_method(config.method, flight_rng=check_streams.flight,
                   scheduling_rng=check_streams.scheduling, checkpoint=config.checkpoint,

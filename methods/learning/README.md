@@ -11,4 +11,4 @@
 
 `Rollout` 是一次更新的数据容器，不负责环境采样或长期经验回放。`gae_returns` 接受完整回合，末步必须是真实终止，不支持将任意 buffer 截断当成终止。需要截断自举的其他方案应显式扩展接口。
 
-Member 候选特征、Master 动作维度、动作 mask 规则、奖励、阶段冻结和训练/验证划分均在 `solutions/ppo_delay/`。其他方案可以复用以上工具，自行实现 actor、采样流程和 Trainer；无需照搬 PPO Delay 的业务定义。
+Member 候选特征、Master 动作维度、动作 mask 规则、奖励、阶段冻结和训练/验证划分均在 `solutions/ppo/`。其他方案可以复用以上工具，自行实现 actor、采样流程和 Trainer；无需照搬 PPO Delay 的业务定义。

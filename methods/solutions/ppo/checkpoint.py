@@ -15,7 +15,17 @@ def read_checkpoint(path):
     state = torch.load(Path(path), map_location='cpu', weights_only=True)
     if state.get('format_version') != FORMAT_VERSION or state.get('feature_schema') != 'kbit_23_v1':
         raise ValueError('Checkpoint must use the migrated Kbit PPO schema; legacy KB checkpoints are incompatible')
+    _normalize_solution_name(state)
     return state
+
+
+def _normalize_solution_name(state):
+    """Preserve old model bytes; only the renamed solution ID changes in memory."""
+    method = state.get('metadata', {}).get('signature', {}).get('method', {})
+    if method.get('solution') == 'ppo_delay':
+        method['solution'] = 'ppo'
+    for selected in state.get('selected_checkpoints', {}).values():
+        _normalize_solution_name(selected)
 
 
 def save_learner(learner, path, metadata):

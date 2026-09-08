@@ -92,7 +92,7 @@ class PlanningEnvironment:
         return outcome, metrics
 
 
-class PPODelayMethod:
+class PPOMethod:
     def __init__(self, learner=None, *, checkpoint=None, device='cpu', ordering=None, flight=None, scheduling=None):
         self.learner = learner
         self.checkpoint = checkpoint
@@ -130,4 +130,4 @@ class PPODelayMethod:
 
 
 def build_method(ordering, flight, scheduling):
-    return PPODelayMethod(ordering=ordering, flight=flight, scheduling=scheduling)
+    return PPOMethod(ordering=ordering, flight=flight, scheduling=scheduling)

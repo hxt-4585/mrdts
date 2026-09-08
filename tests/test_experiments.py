@@ -25,7 +25,7 @@ class TestExperiments(unittest.TestCase):
     def test_repeatable_metrics_and_unique_output_directories(self):
         config_module, runner = self.api()
         with tempfile.TemporaryDirectory() as directory:
-            cfg = replace(config_module.load_config(), slots=2, episodes=2,
+            cfg = replace(config_module.load_config('config/experiments/random.toml'), slots=2, episodes=2,
                           output_root=Path(directory), users=4, dag_nodes=3)
             first = runner.evaluate(cfg)
             second = runner.evaluate(cfg)
@@ -48,7 +48,7 @@ class TestExperiments(unittest.TestCase):
         from experiments.scene import build_scene, resolved_settings
         from methods.factory import create_method
 
-        cfg = replace(load_config(), users=4, dag_nodes=3)
+        cfg = replace(load_config('config/experiments/random.toml'), users=4, dag_nodes=3)
         first = build_scene(resolved_settings(cfg), randomness=RandomStreams.from_config(cfg, 0))
         second = build_scene(resolved_settings(cfg), randomness=RandomStreams.from_config(cfg, 1))
         replay = build_scene(resolved_settings(cfg), randomness=RandomStreams.from_config(cfg, 1))
@@ -89,7 +89,7 @@ class TestExperiments(unittest.TestCase):
     def test_swappable_scheduler_produces_complete_placements(self):
         config_module, runner = self.api()
         with tempfile.TemporaryDirectory() as directory:
-            cfg = replace(config_module.load_config(), slots=1, episodes=1,
+            cfg = replace(config_module.load_config('config/experiments/random.toml'), slots=1, episodes=1,
                           output_root=Path(directory), users=4, dag_nodes=3)
             for scheduler in ("local", "owner"):
                 with self.subTest(scheduler=scheduler):
@@ -101,7 +101,7 @@ class TestExperiments(unittest.TestCase):
     def test_direct_entry_works_outside_project(self):
         with tempfile.TemporaryDirectory() as directory:
             process = subprocess.run([sys.executable, str(ROOT / "experiments" / "run.py"),
-                                      "--episodes", "1", "--slots", "1", "--output", directory],
+                                      "--config", "config/experiments/random.toml", "--episodes", "1", "--slots", "1", "--output", directory],
                                      cwd=directory, capture_output=True, text=True)
             self.assertEqual(process.returncode, 0, process.stderr)
             self.assertEqual(len(list(Path(directory).rglob("summary.json"))), 1)
@@ -109,7 +109,7 @@ class TestExperiments(unittest.TestCase):
     def test_missing_trainer_is_explicit_and_does_not_run_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             process = subprocess.run([sys.executable, str(ROOT / "experiments" / "train.py"),
-                                      "--device", "cpu", "--output", directory],
+                                      "--config", "config/experiments/random.toml", "--device", "cpu", "--output", directory],
                                      cwd=directory, capture_output=True, text=True)
             self.assertNotEqual(process.returncode, 0)
             self.assertIn("trainer", process.stderr.lower())
@@ -117,6 +117,7 @@ class TestExperiments(unittest.TestCase):
 
     def test_registered_trainer_receives_config_and_selected_device(self):
         from experiments.train import main
+        from methods.solutions.random.solution import RandomSolution
         received = []
 
         class RecordingTrainer:
@@ -124,9 +125,13 @@ class TestExperiments(unittest.TestCase):
                 received.append((config.seed, config.slots, device))
                 return "trainer-result"
 
-        with patch.dict("methods.factory.TRAINERS", {"random": RecordingTrainer}), \
+        class RecordingSolution(RandomSolution):
+            def create_trainer(self):
+                return RecordingTrainer()
+
+        with patch.dict("methods.factory.SOLUTIONS", {"random": RecordingSolution}), \
                 patch("experiments.train.check_device", return_value=("cuda:0", "test device")):
-            result = main(["--seed", "73", "--slots", "2", "--device", "cuda:0"])
+            result = main(["--config", "config/experiments/random.toml", "--seed", "73", "--slots", "2", "--device", "cuda:0"])
         self.assertEqual(result, "trainer-result")
         self.assertEqual(received, [(73, 2, "cuda:0")])
 
@@ -134,7 +139,7 @@ class TestExperiments(unittest.TestCase):
         from experiments.config import load_config
         from experiments.scene import build_scene, resolved_settings
         from methods.factory import create_method
-        cfg = replace(load_config(), users=4, dag_nodes=3)
+        cfg = replace(load_config('config/experiments/random.toml'), users=4, dag_nodes=3)
         scene = build_scene(resolved_settings(cfg), randomness=RandomStreams.from_config(cfg, 0))
         method = create_method(cfg.method, flight_rng=RandomStreams.from_config(cfg, 0).flight, scheduling_rng=RandomStreams.from_config(cfg, 0).scheduling)
 

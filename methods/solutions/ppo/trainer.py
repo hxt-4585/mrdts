@@ -27,7 +27,7 @@ def evaluate_fresh(config, learner, steps, episode_id):
     return run_epoch(fresh_scene(config, episode_id), learner, stage='evaluation', steps=steps)
 
 
-class PPODelayTrainer:
+class PPOTrainer:
     def train(self, config, device):
         settings = TrainingSettings.from_config(config)
         from methods.factory import validate_method

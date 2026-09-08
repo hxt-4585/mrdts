@@ -11,7 +11,7 @@ uv sync --locked
 uv run python -m experiments.train --check
 ```
 
-项目使用 Python 3.11。`pyproject.toml` 将 Windows/Linux 的 torch 显式绑定到官方 CUDA 12.6 索引，锁文件固定 `torch 2.10.0+cu126`；默认设备是 `cuda`，请求 GPU 失败时会报错，不会静默改用 CPU。
+项目使用 Python 3.11。`pyproject.toml` 将 Windows/Linux 的 torch 显式绑定到官方 CUDA 12.6 索引，锁文件固定 `torch 2.10.0+cu126`；默认 PPO 配置使用 `cpu`；显式请求 GPU 失败时会报错，不会静默改用 CPU。
 `--check` 实际执行矩阵运算和反向传播；不进行模型训练。显式 CPU 检查可用 `--device cpu --check`。
 NumPy 仿真与启发式算法仍在 CPU 执行，GPU 用于 PyTorch 网络训练；PPO 默认配置显式使用 CPU。
 
@@ -23,24 +23,24 @@ NumPy 仿真与启发式算法仍在 CPU 执行，GPU 用于 PyTorch 网络训�
 
 ```powershell
 # 已迁移的 PPO 时延基线。
-uv run python -m experiments.train --config config/experiments/ppo_delay.toml
+uv run python -m experiments.train --config config/experiments/ppo.toml
 
 # 可立即运行的 Random 方案实验。
-uv run python -m experiments.run
-uv run python -m experiments.run --slots 2 --seed 7 --scheduling local
+uv run python -m experiments.run --config config/experiments/random.toml
+uv run python -m experiments.run --config config/experiments/random.toml --slots 2 --seed 7 --scheduling local
 ```
 
 PyCharm：
 
 1. 项目解释器选择本项目 `.venv/Scripts/python.exe`；先运行一次 `uv sync --locked`。
 2. 打开 `experiments/train.py`，右键 Run，或点击文件底部 `if __name__ == "__main__"` 的运行按钮。
-3. 验证 GPU 时，在 Run Configuration 的 Parameters 中填 `--check`。运行 PPO 时填写 `--config config/experiments/ppo_delay.toml`，去掉 `--check` 即可训练。
-4. 当前可直接打开 `experiments/run.py` 点击 Run，启动完整 Random 方案评估。
-5. 不传参数时读取 `config/experiments/random.toml`。可以直接修改此配置，也可在 Parameters 中填写 `--config config/experiments/xxx.toml`。
+3. 检查默认 CPU 配置时填写 `--check`；检查 GPU 时填写 `--device cuda --check`。去掉 `--check` 即启动 PPO 训练。
+4. 运行 Random 时打开 `experiments/run.py` 并填写 `--config config/experiments/random.toml`；评估 PPO 时填写 `--checkpoint <运行目录>/checkpoints/best.pt`。
+5. 不传参数时读取 `config/experiments/ppo.toml`。可以直接修改此配置，也可在 Parameters 中填写 `--config config/experiments/xxx.toml`。
 
 两种方式调用相同代码。默认配置、配置内部引用以及相对输出路径均以项目根目录解析，不要求 PyCharm 的 Working directory 恰好为项目根目录。
 
-**当前训练能力：** `ppo_delay` 已注册分阶段 PPO，奖励只优化 epoch 内的全局截断时延。默认 Member 100 epoch、Master 30 epoch，每 epoch 500 时隙。训练、续训、checkpoint 评估及日志说明见 [PPO 使用说明](methods/solutions/ppo_delay/README.md)。无参数仍选择 Random，Random 无需训练。
+**当前训练能力：** `ppo` 已注册分阶段 PPO，奖励只优化 epoch 内的全局截断时延。默认 Member 100 epoch、Master 30 epoch，每 epoch 500 时隙。训练、续训、checkpoint 评估及日志说明见 [PPO 使用说明](methods/solutions/ppo/README.md)。无参数选择 PPO：`train.py` 启动训练，`run.py` 必须指定 checkpoint 才能评估。Random 无需训练，应显式选择其配置。
 
 ## 目录职责
 
@@ -56,7 +56,7 @@ methods/
     scheduling/                   Member 多 DAG 调度组件
   solutions/
     random/                       ERS + 随机飞行 + 随机调度
-    ppo_delay/                    已迁移的 PPO 时延基线
+    ppo/                    已迁移的 PPO 时延基线
     proposed/                     自己的方法、观测、奖励、训练器落点
   learning/                       共享设备检查、网络、缓存和更新算法
 config/
@@ -89,7 +89,7 @@ flight = "random"
 scheduling = "random"
 ```
 
-默认组合：ordering=`ers`、flight=`random`、scheduling=`random`。另保留 stationary 飞行、owner/local 调度作为可替换组件，不再注册 baseline 完整方法。
+Random 组合：ordering=`ers`、flight=`random`、scheduling=`random`。另保留 stationary 飞行、owner/local 调度作为可替换组件，不再注册 baseline 完整方法。
 实验 TOML 的 `[components]` 可以覆盖其中某一个组件。`--scheduling local` 提供同样的单项覆盖。
 
 完整方法决定观测、信息可见范围与奖励/优化目标；`env` 只提供事实和物理执行。通用组件输入不是固定的 RL 张量。
@@ -100,10 +100,12 @@ scheduling = "random"
 接入新方法：
 
 1. 在对应 `components/` 目录实现算法，注册到 `methods/factory.py`；排序组件使用无参构造，飞行和调度工厂接收各自独立的 NumPy Generator。
-2. 在 `solutions/<name>/method.py` 实现完整方法，并加入 `SOLUTIONS`。它可以使用 `CompositeMethod`，或为耦合算法定义自己的时隙流程。
+2. 在 `solutions/<name>/` 实现完整方法与 `Solution` 适配器，将适配器加入 `methods/factory.py` 的 `SOLUTIONS`。方法可以使用 `CompositeMethod`，或定义自己的时隙流程。
 3. 在方法目录实现观测/奖励。方法所需参数保留在方法配置字典中。
-4. 需要学习时，实现 `Trainer.train(config, device)` 并加入 `TRAINERS`。实验 `[training]` 参数通过 `config.training` 传入，训练器负责将网络和张量放到该设备。
+4. 需要学习时，实现 `Trainer.train(config, device)`，由适配器的 `create_trainer()` 返回。实验 `[training]` 参数通过 `config.training` 传入，训练器负责设备、模型和训练流程。
 5. 训练器可复用 `experiments/artifacts.py` 存储配置和运行元数据，按需保存 checkpoints；冻结模块与重新训练的实验应使用不同配置和标识。
+
+公共实验入口不判断方案名称。专用命令行参数、配置解析与模型检查由方案适配器提供；也可以用通用 `--training hidden=32` 覆盖配置。新增方案通常无需修改 `experiments/`，完整接口和例子见 [方案接入说明](methods/README.md)。
 
 ## 实验与结果
 

@@ -3,6 +3,7 @@
 import csv
 from dataclasses import replace
 import importlib
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -16,10 +17,10 @@ from experiments.config import load_config
 class TestPPOExperiments(unittest.TestCase):
     def config(self, root, member=1, master=1):
         try:
-            importlib.import_module('methods.solutions.ppo_delay.trainer')
+            importlib.import_module('methods.solutions.ppo.trainer')
         except ModuleNotFoundError:
             self.fail('Integrated PPO trainer is missing')
-        return replace(load_config('config/experiments/ppo_delay.toml'), output_root=Path(root),
+        return replace(load_config('config/experiments/ppo.toml'), output_root=Path(root),
                        episodes=member+master, users=4, dag_nodes=3, slots=2, device='cpu',
                        training=dict(member_epochs=member, master_epochs=master, update_every_steps=1,
                                      eval_steps=2, test_steps=2, eval_every=1, hidden=16,
@@ -28,11 +29,11 @@ class TestPPOExperiments(unittest.TestCase):
     def test_train_checkpoint_evaluation_and_random_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             config = self.config(directory)
-            from methods.solutions.ppo_delay.trainer import PPODelayTrainer
+            from methods.solutions.ppo.trainer import PPOTrainer
             from experiments.runner import evaluate
-            path = PPODelayTrainer().train(config, torch.device('cpu'))
+            path = PPOTrainer().train(config, torch.device('cpu'))
             self.assertEqual(path.parent.name, 'seed_42')
-            self.assertEqual(path.parent.parent.name, 'ppo_delay_ers_ppo_ppo')
+            self.assertEqual(path.parent.parent.name, 'ppo_ers_ppo_ppo')
             self.assertEqual(json.loads((path/'metadata.json').read_text())['status'], 'completed')
             with (path/'training/epochs.csv').open() as stream:
                 epochs = list(csv.DictReader(stream))
@@ -73,9 +74,9 @@ class TestPPOExperiments(unittest.TestCase):
     def test_resume_matches_uninterrupted_and_archives_uncheckpointed_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             config = self.config(directory, member=2, master=1)
-            from methods.solutions.ppo_delay.trainer import PPODelayTrainer
-            from methods.solutions.ppo_delay.checkpoint import read_checkpoint
-            trainer = PPODelayTrainer()
+            from methods.solutions.ppo.trainer import PPOTrainer
+            from methods.solutions.ppo.checkpoint import read_checkpoint
+            trainer = PPOTrainer()
             full = trainer.train(config, torch.device('cpu'))
             short = trainer.train(replace(config, episodes=1, training={**config.training, 'member_epochs':1,'master_epochs':0}), torch.device('cpu'))
             with (short/'metrics.csv').open() as stream:
@@ -93,6 +94,17 @@ class TestPPOExperiments(unittest.TestCase):
                 validation = list(csv.DictReader(stream))
             with (short/'training/validation.csv').open('a', newline='') as stream:
                 csv.DictWriter(stream,list(validation[-1])).writerow({**validation[-1], 'stage':'master'})
+            # A renamed historical checkpoint must resume without changing its model bytes on read.
+            latest = short/'checkpoints/latest.pt'
+            legacy = torch.load(latest, weights_only=True)
+            legacy['metadata']['signature']['method']['solution'] = 'ppo_delay'
+            for selected in legacy['selected_checkpoints'].values():
+                selected['metadata']['signature']['method']['solution'] = 'ppo_delay'
+            torch.save(legacy, latest)
+            digest = hashlib.sha256(latest.read_bytes()).hexdigest()
+            normalized = read_checkpoint(latest)
+            self.assertEqual(normalized['metadata']['signature']['method']['solution'], 'ppo')
+            self.assertEqual(hashlib.sha256(latest.read_bytes()).hexdigest(), digest)
             resumed = trainer.train(replace(config,resume=short/'checkpoints/latest.pt'), torch.device('cpu'))
             self.assertEqual(short,resumed)
             a,b=read_checkpoint(full/'checkpoints/latest.pt'),read_checkpoint(resumed/'checkpoints/latest.pt')

@@ -23,10 +23,10 @@
 100 用户、每 DAG 10 节点、seed 42，使用当前真实仿真。命令：
 
 ```powershell
-.venv/Scripts/python.exe -B -m experiments.train --config config/experiments/ppo_delay.toml --member-epochs 30 --master-epochs 5 --slots 8 --eval-steps 8 --test-steps 16 --eval-every 5 --device cpu
+.venv/Scripts/python.exe -B -m experiments.train --config config/experiments/ppo.toml --member-epochs 30 --master-epochs 5 --slots 8 --eval-steps 8 --test-steps 16 --eval-every 5 --device cpu
 ```
 
-运行目录：`results/ppo_delay/runs/ppo_delay_ers_ppo_ppo/seed_42/20260907T173334_390991Z_0fedc62e/`。
+运行目录：`results/ppo/runs/ppo_ers_ppo_ppo/seed_42/20260907T173334_390991Z_0fedc62e/`。
 
 | 固定验证集（ID 0，8 时隙） | 截断平均时延 / 秒 |
 |---|---:|
@@ -44,17 +44,17 @@
 | ERS + 原地停留 + 本地执行 | 0.5500116855 | 0 |
 | Random（ERS + 随机飞行 + 随机调度） | 0.4838021887 | 10 |
 
-训练目录的 `training/test.json` 与独立加载 checkpoint 的评估一致。配对运行详情保存在该目录的 `training/paired_check.json`，独立评估运行现已并入 `results/ppo_delay/runs/`。这里仅为单 seed、固定布局、短任务流的工程验证，不能用来宣称多种子优势或新布局泛化。
+训练目录的 `training/test.json` 与独立加载 checkpoint 的评估一致。配对运行详情保存在该目录的 `training/paired_check.json`，独立评估按方案分别保存在 `results/ppo/runs/` 和 `results/random/runs/`。这里仅为单 seed、固定布局、短任务流的工程验证，不能用来宣称多种子优势或新布局泛化。
 
 ## 长回合与产物检查
 
 补充真实 500 时隙回合检查，使用 Member 1 epoch、Master 1 epoch，共 1000 训练时隙；验证长度 4、测试长度 16。命令：
 
 ```powershell
-.venv/Scripts/python.exe -B -m experiments.train --config config/experiments/ppo_delay.toml --member-epochs 1 --master-epochs 1 --slots 500 --eval-steps 4 --test-steps 16 --eval-every 1 --device cpu
+.venv/Scripts/python.exe -B -m experiments.train --config config/experiments/ppo.toml --member-epochs 1 --master-epochs 1 --slots 500 --eval-steps 4 --test-steps 16 --eval-every 1 --device cpu
 ```
 
-运行目录：`results/ppo_delay/runs/ppo_delay_ers_ppo_ppo/seed_42/20260908T020039_495610Z_82a519e8/`。运行正常完成：1000 条连续逐时隙记录，各阶段 slot_start 均为 0–499，训练任务流 ID 分别为 2、3；Member 63 次更新、Master 1 次更新，所有 loss/KL/entropy 有限。Master 阶段的 Member actor/critic 与选出的 Member checkpoint 逐位一致，Master 参数确实发生更新。
+运行目录：`results/ppo/runs/ppo_ers_ppo_ppo/seed_42/20260908T020039_495610Z_82a519e8/`。运行正常完成：1000 条连续逐时隙记录，各阶段 slot_start 均为 0–499，训练任务流 ID 分别为 2、3；Member 63 次更新、Master 1 次更新，所有 loss/KL/entropy 有限。Master 阶段的 Member actor/critic 与选出的 Member checkpoint 逐位一致，Master 参数确实发生更新。
 
 | 指标 | 结果 |
 |---|---:|
@@ -78,4 +78,20 @@
 
 从项目外目录直接运行 `experiments/train.py --resume ... --check --device cpu` 也通过，确认 PyCharm 类入口与项目相对路径解析。随后实际执行不带 `--config` 的 `--resume latest.pt --device cpu`，自动恢复已完成的短程运行并重现保留测试 reward `-0.4504597411`。最终代码、使用说明和验证记录保存在开发分支；大量运行产物按现有规则不提交 Git。
 
-结果目录命名按后续要求简化为 `ppo_delay_ers_ppo_ppo`；原 `ppo_delay_check` 的配对运行已并入同一实验。移动保留原指标和 checkpoint，JSON 中的活动路径同步更新，metadata 记录原位置。Checkpoint 内的历史保存位置仍保留为来源记录，续训以传入的最新文件位置为准。
+结果目录命名按后续要求简化为 `ppo_ers_ppo_ppo`；原 `ppo_delay_check` 的配对运行按方案分别放入 `results/ppo/` 与 `results/random/`。移动保留原指标和 checkpoint，JSON 中的活动路径同步更新，metadata 记录原位置。Checkpoint 内的历史保存位置仍保留为来源记录，续训以传入的最新文件位置为准。
+
+## 方案边界重构与更名验证
+
+新增 `methods/solution.py` 的方案接口及 Random/PPO 适配器。公共 CLI、训练与评估入口不再导入具体方案或判断 PPO 名称；PPO 自身注册专用 CLI 参数并处理阶段预算、配置检查、模型格式和测试集限制。公共 `--training KEY=VALUE` 按 TOML 类型覆盖训练参数。新方案接入说明见 `methods/README.md`。
+
+方案源码与配置改名为 `ppo`；本地旧结果迁移至 `results/ppo/runs/ppo_ers_ppo_ppo/`，57 个原文件保留，10 个 checkpoint 在迁移前后哈希一致。历史 checkpoint 的方案签名仅在内存中规范化，嵌套的选优快照同样支持。外部旧运行配置中的 `ppo_delay` 也可通过 CLI 解析成新方案名，读取过程不写回配置；续训仍使用指定的运行目录。
+
+与重构前 HEAD 比较，PPO 的网络、观测、奖励、采样、方法执行、训练器、设置及日志这 8 个文件除名称替换外相同；环境、Random 原有方法、通用 PPO 更新模块未修改。全量检查曾发现 Random 适配器误用通用方法导致服务区域回退失效，已改为调用原 Random 构造器，其回退回归通过。
+
+验证覆盖：临时注册新方案即可通过现有 CLI/train/evaluate 使用专用参数、配置检查和 checkpoint；新旧名称配置解析；旧签名模型精确续训；Random 评估与飞行回退；可视化任意阶段、单 loss 和可选指标。更名后的真实短程模型独立评估，以及在临时副本中的完整恢复执行，截断平均时延均为 `0.4504597411215255` 秒，与原记录相同。未重写原始模型。
+
+可视化改为从日志识别阶段与实际指标，支持 `loss`、任意 `*_loss` 及可选 KL/entropy/时延；缺失指标不补零，不生成无数据诊断图。输出继续保存在运行目录的 `figures/training/`。本次结构调整没有运行新的完整 130 epoch 训练，也没有执行 Git 提交。
+
+本次最终验证：`.venv/Scripts/python.exe -B -m unittest discover -s tests -q` 共 174 项通过（36.935 秒），`git diff --check` 通过。
+
+用户随后明确授权提交并上传 codex/development。提交前默认配置已切换为 PPO（CPU）；Random 测试显式选择 Random 配置，启动说明同步更新。最终完整回归 174 项通过（39.318 秒），无参数 train --check 通过。

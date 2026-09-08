@@ -23,6 +23,47 @@ def write_csv(path, fields, rows, incomplete_tail=None):
 
 
 class ReaderTests(unittest.TestCase):
+    def test_generic_loss_is_optional_but_supplied_values_must_be_finite(self):
+        from visualization.readers import read_updates
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "updates.csv"
+            fields = ["epoch", "stage", "update", "total_steps", "loss"]
+            row = dict(epoch=1, stage="train", update=1, total_steps=8, loss=0.25)
+            write_csv(path, fields, [row])
+            parsed = read_updates(path)
+            self.assertEqual(parsed[0].metrics, {"loss": 0.25})
+            write_csv(path, fields, [{**row, "loss": "nan"}])
+            with self.assertRaisesRegex(ValueError, "finite"):
+                read_updates(path)
+
+    def test_sparse_custom_loss_and_diagnostics_keep_missing_values_and_chronology(self):
+        from visualization.readers import read_updates
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "updates.csv"
+            fields = ["epoch", "stage", "update", "total_steps", "critic_loss", "entropy"]
+            rows = [dict(epoch=1, stage="train", update=1, total_steps=8, critic_loss=.4),
+                    dict(epoch=2, stage="train", update=2, total_steps=16, entropy=.3)]
+            write_csv(path, fields, rows)
+            parsed = read_updates(path)
+            self.assertEqual([row.metrics for row in parsed],
+                             [{"critic_loss": .4}, {"entropy": .3}])
+            write_csv(path, fields, list(reversed(rows)))
+            with self.assertRaisesRegex(ValueError, "increasing"):
+                read_updates(path)
+
+    def test_arbitrary_validation_stages_reject_backward_boundary(self):
+        from visualization.readers import read_validation
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "validation.csv"
+            row = dict(epoch=0, stage="warmup", steps=2, epoch_return=-2, mean_reward=-1)
+            rows = [row, {**row, "epoch": 1, "stage": "train"}, {**row, "epoch": 1}]
+            write_csv(path, list(row), rows)
+            with self.assertRaisesRegex(ValueError, "chronological"):
+                read_validation(path)
+
     def test_epochs_ignore_incomplete_tail_and_keep_stages(self):
         from visualization.readers import read_epochs
 
@@ -118,6 +159,40 @@ class ReaderTests(unittest.TestCase):
 
 
 class FigureTests(unittest.TestCase):
+    def test_single_stage_loss_only_exports_no_fabricated_diagnostics(self):
+        import matplotlib
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        from visualization.readers import read_run
+        from visualization.training import export, losses_figure, reward_figure
+        from visualization.watch import _draw_losses
+
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            epoch = dict(epoch=1, stage="train", stage_epoch=1, steps=2,
+                         total_steps=2, epoch_return=-4, mean_reward=-2)
+            write_csv(run / "training" / "epochs.csv", list(epoch), [epoch])
+            update = dict(epoch=1, stage="train", update=1, total_steps=2, loss=.75)
+            write_csv(run / "training" / "updates.csv", list(update), [update])
+            data = read_run(run)
+            reward = reward_figure(data)
+            losses = losses_figure(data)
+            self.assertEqual(len(reward.axes), 2)
+            self.assertEqual(len(losses.axes), 1)
+            self.assertEqual(list(losses.axes[0].lines[0].get_ydata()), [.75])
+            live, axes = plt.subplots(1, 2)
+            _draw_losses(live, axes, data)
+            self.assertEqual(len(live.axes), 1)
+            self.assertEqual(list(live.axes[0].lines[0].get_ydata()), [.75])
+            output = export(run)
+            self.assertTrue((output / "losses.png").exists())
+            self.assertFalse((output / "diagnostics.png").exists())
+            with (output / "source.csv").open(encoding="utf-8") as stream:
+                source = list(csv.DictReader(stream))
+            self.assertEqual(source[-1]["loss"], "0.75")
+            self.assertNotIn("approx_kl", source[-1])
+            plt.close("all")
+
     def make_run(self, directory):
         run = Path(directory) / "run"
         training = run / "training"
@@ -179,6 +254,23 @@ class FigureTests(unittest.TestCase):
 
         smoothed = stage_smooth(["member", "member", "master"], [1.0, 3.0, 100.0], window=5)
         self.assertEqual(smoothed, [1.0, 2.0, 100.0])
+
+    def test_recurring_stage_does_not_connect_or_smooth_across_intervening_stage(self):
+        import matplotlib
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+        from types import SimpleNamespace
+        from visualization.training import _plot_stage_series
+
+        stages = ["train"] * 3 + ["refine"] + ["train"] * 3
+        rows = [SimpleNamespace(epoch=index, stage=stage, mean_reward=float(index))
+                for index, stage in enumerate(stages, 1)]
+        figure, axis = plt.subplots()
+        _plot_stage_series(axis, rows, "mean_reward")
+        self.assertEqual(len(axis.lines), 3)
+        self.assertFalse(any("smoothed" in line.get_label() for line in axis.lines))
+        self.assertEqual(list(axis.lines[-1].get_xdata()), [5, 6, 7])
+        plt.close(figure)
 
     def test_smoothed_line_starts_only_after_a_full_five_point_window(self):
         import matplotlib

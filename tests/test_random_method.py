@@ -16,7 +16,7 @@ from methods.factory import create_method
 
 class TestRandomMethod(unittest.TestCase):
     def test_default_is_ers_random_random(self):
-        method = load_config().method
+        method = load_config('config/experiments/random.toml').method
         self.assertEqual(method["solution"], "random")
         self.assertEqual(method["components"], dict(ordering="ers", flight="random", scheduling="random"))
 
@@ -28,7 +28,7 @@ class TestRandomMethod(unittest.TestCase):
         context = FlightContext(0, (3, 7), np.zeros((2, 3)))
         def actions(seed):
             return flight(RandomStreams(seed).flight).decide(context).member_actions
-        seed = load_config().seed
+        seed = load_config('config/experiments/random.toml').seed
         self.assertEqual(actions(seed), actions(seed))
         self.assertNotEqual(actions(seed), actions(seed + 1))
         values = np.asarray(list(actions(seed).values()))
@@ -36,7 +36,7 @@ class TestRandomMethod(unittest.TestCase):
         self.assertTrue(np.any(values != 0))
 
     def test_multiple_slots_preserve_service_and_complete_all_dags(self):
-        cfg = replace(load_config(), users=4, dag_nodes=3)
+        cfg = replace(load_config('config/experiments/random.toml'), users=4, dag_nodes=3)
         scene = build_scene(resolved_settings(cfg), randomness=RandomStreams.from_config(cfg, 0))
         method = create_method(cfg.method, flight_rng=RandomStreams.from_config(cfg, 0).flight, scheduling_rng=RandomStreams.from_config(cfg, 0).scheduling)
         positions = scene.simulator.members.positions.copy()
@@ -47,7 +47,7 @@ class TestRandomMethod(unittest.TestCase):
         self.assertFalse(np.array_equal(positions, scene.simulator.members.positions))
 
     def test_random_scheduling_is_legal_repeatable_and_independent_of_flight_stream(self):
-        cfg = load_config()
+        cfg = load_config('config/experiments/random.toml')
         first = create_method(cfg.method, flight_rng=RandomStreams.from_config(cfg, 0).flight, scheduling_rng=RandomStreams.from_config(cfg, 0).scheduling)
         second = create_method(cfg.method, flight_rng=RandomStreams.from_config(cfg, 0).flight, scheduling_rng=RandomStreams.from_config(cfg, 0).scheduling)
         owner = EntityRef(EntityKind.MEMBER_UAV, 0)
@@ -63,7 +63,7 @@ class TestRandomMethod(unittest.TestCase):
         self.assertEqual(first.flight.decide(flight_context), second.flight.decide(flight_context))
 
     def test_service_region_rejections_fall_back_without_mutating_preview_state(self):
-        cfg = replace(load_config(), users=4, dag_nodes=3)
+        cfg = replace(load_config('config/experiments/random.toml'), users=4, dag_nodes=3)
         scene = build_scene(resolved_settings(cfg), randomness=RandomStreams.from_config(cfg, 0))
         method = create_method(cfg.method, flight_rng=RandomStreams.from_config(cfg, 0).flight, scheduling_rng=RandomStreams.from_config(cfg, 0).scheduling)
         members = scene.simulator.members

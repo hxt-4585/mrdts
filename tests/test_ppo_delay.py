@@ -24,13 +24,13 @@ class TestPPODelay(unittest.TestCase):
 
     def api(self):
         try:
-            return importlib.import_module('methods.solutions.ppo_delay.method'), importlib.import_module('methods.solutions.ppo_delay.rollout')
+            return importlib.import_module('methods.solutions.ppo.method'), importlib.import_module('methods.solutions.ppo.rollout')
         except ModuleNotFoundError:
             self.fail('The migrated PPO method and rollout are missing')
 
     def test_masks_and_ground_prior(self):
         self.api()
-        from methods.solutions.ppo_delay.networks import MemberActor, MasterActor
+        from methods.solutions.ppo.networks import MemberActor, MasterActor
         actor = MemberActor(23)
         obs = torch.zeros(2, 14, 23)
         obs[:, 0, 11] = 1
@@ -49,7 +49,7 @@ class TestPPODelay(unittest.TestCase):
 
     def test_kbit_observation_matches_runtime_input(self):
         method, _ = self.api()
-        from methods.solutions.ppo_delay.observations import MemberPlanning
+        from methods.solutions.ppo.observations import MemberPlanning
         scene = scene_for()
         env = method.PlanningEnvironment(scene)
         batch = env.begin(scene.workload(0), np.zeros((12, 2)))
@@ -94,7 +94,7 @@ class TestPPODelay(unittest.TestCase):
     def test_true_terminal_gae_and_all_failed_reward(self):
         self.api()
         from methods.learning.algorithms.ppo import gae_returns
-        from methods.solutions.ppo_delay.reward import delay_metrics
+        from methods.solutions.ppo.reward import delay_metrics
         from env.runtime.slot_result import SlotResult, DAGResult
         np.testing.assert_allclose(gae_returns(np.array([[-1.], [-2.], [-8.]]), np.zeros((3,1)), [False,True,True], lam=1.)[:,0], [-3,-2,-8])
         metrics = delay_metrics(SlotResult(5,6,(DAGResult((0,0,0),None,True),),0,0))

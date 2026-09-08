@@ -8,7 +8,7 @@ import tomllib
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = PROJECT_ROOT / "config" / "experiments" / "random.toml"
+DEFAULT_CONFIG = PROJECT_ROOT / "config" / "experiments" / "ppo.toml"
 
 
 def project_path(path):

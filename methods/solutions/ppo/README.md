@@ -13,10 +13,10 @@ Member 使用共享的 23 维候选评分网络，初始化本地执行偏置为
 在项目环境运行，或将相同参数填入 PyCharm 的 `experiments/train.py` 配置：
 
 ```powershell
-uv run python -m experiments.train --config config/experiments/ppo_delay.toml
+uv run python -m experiments.train --config config/experiments/ppo.toml
 
 # 先做短程检查；这不是默认完整训练预算。
-uv run python -m experiments.train --config config/experiments/ppo_delay.toml --member-epochs 30 --master-epochs 5 --slots 8 --eval-steps 8 --test-steps 16 --eval-every 5
+uv run python -m experiments.train --config config/experiments/ppo.toml --member-epochs 30 --master-epochs 5 --slots 8 --eval-steps 8 --test-steps 16 --eval-every 5
 ```
 
 此配置显式使用 CPU；可用 `--device cuda` 选择 GPU，设备不可用会报错。项目锁定的 CUDA 构建需要兼容驱动。
@@ -40,7 +40,7 @@ uv run python -m visualization.watch --run <run> --interval 2
 
 ## 输出
 
-与 Random 共用路径 `results/<实验名>/runs/<方案_排序_飞行算法_调度算法>/seed_<seed>/<时间戳_ID>/`。PPO 使用 `ppo_delay_ers_ppo_ppo`，目录只写算法名称，不附加 Master/Member 角色：
+与 Random 共用路径 `results/<实验名>/runs/<方案_排序_飞行算法_调度算法>/seed_<seed>/<时间戳_ID>/`。PPO 使用 `ppo_ers_ppo_ppo`，目录只写算法名称，不附加 Master/Member 角色：
 
 ```text
 <run>/
@@ -66,8 +66,14 @@ uv run python -m visualization.watch --run <run> --interval 2
 
 ## 代码边界
 
+`solution.py` 承接公共 `Solution` 接口，负责命令行参数、阶段预算、配置校验、方法与训练器构造，以及模型评估的环境和测试集检查。公共实验入口无需识别 PPO。
+
 `networks.py`、`observations.py`、`reward.py` 定义本方案；`method.py` 统一训练与推理执行；`rollout.py` 负责采样和阶段更新；`trainer.py` 负责训练生命周期；`settings.py`、`checkpoint.py`、`logs.py` 分别负责配置、状态保存和日志。
 
 `methods/learning/` 的 PPO、GAE、Rollout 和 MLP 可供其他方法复用。`components/flight/ppo.py` 与 `components/scheduling/ppo.py` 是张量推理组件，由本方案提供观测；其上下文不同于 Random 的通用启发式上下文，工厂目前只允许 `ers / ppo_master / ppo_member` 的完整 PPO 组合。
 
 旧版 KB 特征与当前 Kbit 不同，旧 checkpoint 不直接加载；迁移格式记录为 `kbit_23_v1`。实际验证记录见 `docs/research/2026-09-08-ppo-delay-migration-verification.md`。
+
+方案名称已由 `ppo_delay` 改为 `ppo`，配置路径为 `config/experiments/ppo.toml`，默认结果路径为 `results/ppo/runs/ppo_ers_ppo_ppo/`。已有 Kbit checkpoint 中的旧方案名称在读取时转换，原始模型文件不重写；旧运行的 JSON 配置和当前路径引用已同步迁移。历史来源分支名称保持原样。
+
+外部旧运行目录也可直接通过 `--resume` 或 `--checkpoint` 读取：旧配置中的方案名会在内存中解析成 `ppo`，新建评估运行使用新名称。续训继续使用用户指定的原运行目录，不自动搬动外部备份。

@@ -8,7 +8,7 @@
 
 MRDTS 是多区域 UAV 的 DAG 子任务调度仿真与方法比较项目。一个完整方法通常由三个模块构成：子任务排序、Master UAV 飞行策略、Member UAV 子任务调度。需要支持多个文献 baseline、自提方案，以及组件替换实验；方法可以使用强化学习、启发式或优化算法。
 
-目前可运行的完整方法为 `random`（ERS + 随机飞行 + 随机调度）和 `ppo_delay`（ERS + 连续 Master PPO + 共享 Member PPO）。后者已接入训练、续训和模型评估，只优化全局截断时延。`proposed` 仍为预留目录。
+目前可运行的完整方法为 `random`（ERS + 随机飞行 + 随机调度）和 `ppo`（ERS + 连续 Master PPO + 共享 Member PPO）。后者已接入训练、续训和模型评估，只优化全局截断时延。`proposed` 仍为预留目录。
 
 `baseline` 是对比方法的统称，不是只容纳一个方法的固定名称。每个正式方案在 `methods/solutions/` 中拥有自己的目录，与 `random/`、`proposed/` 同级。旧的 `baseline` 方案和 `scheduling_ablation` 示例配置已经移除。
 
@@ -43,7 +43,7 @@ mrdts/
 │   │   └── scheduling/           Member 为子任务选择执行节点
 │   ├── solutions/                每个完整方案各占一个目录
 │   │   ├── random/               已实现：ERS + 随机飞行 + 随机调度
-│   │   ├── ppo_delay/            已实现：观测、奖励、采样、分阶段 PPO 训练器
+│   │   ├── ppo/            已实现：观测、奖励、采样、分阶段 PPO 训练器
 │   │   └── proposed/             预留：自提方案及其观测、奖励和训练器
 │   └── learning/                 可复用的学习支持代码
 │       ├── networks/             通用 MLP 与 ValueNetwork
@@ -100,7 +100,7 @@ mrdts/
 | `methods/components/scheduling/` | `random` 随机合法节点、`local` 用户本地、`owner` 所属 Member、`ppo_member` 张量策略组件 |
 | `methods/solutions/random/method.py` | Random 的完整方案组合及飞行可行性筛选 |
 | `methods/solutions/proposed/` | 自提方案未来实现位置，目前仅说明文件 |
-| `methods/solutions/ppo_delay/` | 本方案观测、网络、奖励、统一执行与训练生命周期 |
+| `methods/solutions/ppo/` | 本方案观测、网络、奖励、统一执行与训练生命周期 |
 | `methods/learning/` | 可复用的 PPO、GAE、Rollout、MLP 与 CPU/CUDA 检查 |
 
 `local.py` 等组件文件的存在，不代表存在名为 Local 的完整 baseline。正式新增方案应同时具有完整方案实现、注册和配置。组件替换接口可以保留，但不要将未命名、未实现的组合描述成已有正式方案。
@@ -148,10 +148,10 @@ config/experiments/random.toml
             └── components 选择排序、飞行、调度组件
 ```
 
-当前默认入口：
+当前默认训练入口（PPO，CPU）：
 
 ```powershell
-uv run python -m experiments.run
+uv run python -m experiments.train
 ```
 
 选择某个已实现方案的实验配置：
@@ -160,7 +160,7 @@ uv run python -m experiments.run
 uv run python -m experiments.run --config config/experiments/random.toml
 ```
 
-不传 `--config` 时读取 `experiments/config.py` 中的 `DEFAULT_CONFIG`。PyCharm 使用项目 `.venv/Scripts/python.exe`，直接运行 `experiments/run.py`；需要切换方案时在运行参数中填写 `--config ...`。需要训练的方法通过 `train.py` 启动，PPO 已注册训练器，使用 `--config config/experiments/ppo_delay.toml`。
+不传 `--config` 时读取 `experiments/config.py` 中的 `DEFAULT_CONFIG`。默认配置为 `config/experiments/ppo.toml`。PyCharm 使用项目 `.venv/Scripts/python.exe`，直接运行 `experiments/train.py` 启动 PPO 训练；`run.py` 评估 PPO 需指定 checkpoint，运行 Random 需显式选择其配置；需要切换方案时在运行参数中填写 `--config ...`。需要训练的方法通过 `train.py` 启动，PPO 已注册训练器，使用 `--config config/experiments/ppo.toml`。
 
 GPU torch 的依赖来源由 `pyproject.toml` 和 `uv.lock` 管理。NumPy 环境仿真和当前 Random 在 CPU 执行，PyTorch GPU 支持用于学习方法；`train.py --check` 成功不代表实现了训练算法。
 
@@ -191,6 +191,7 @@ PPO 已在同一运行目录保存 `checkpoints/` 与 `training/`（epochs、upd
 |---|---|
 | 新增排序、飞行或调度算法 | 对应 `methods/components/` 子目录及 `methods/factory.py` |
 | 新增文献 baseline 或自提完整方案 | `methods/solutions/<名称>/`、注册表、方法配置、实验配置 |
+| 专用训练参数、配置解析、模型加载或测试集检查 | 方案目录中的 `solution.py` 及其调用的模块；公共入口只调用 `Solution` 接口 |
 | 为 RL 方案定义观测、奖励、训练器或库适配器 | 对应 `methods/solutions/<名称>/` |
 | 复用网络、经验缓存、学习更新逻辑 | `methods/learning/` 对应子目录 |
 | 调整物理模型、通信规则、事件执行与结算 | `env/` 对应子模块，并同步 `specs/` |
@@ -201,4 +202,6 @@ PPO 已在同一运行目录保存 `checkpoints/` 与 `training/`（epochs、upd
 
 接手项目时，先阅读本文和根 README，再查看目标方案配置、`methods/factory.py` 及相关实现。修改前运行 `git status` 和 `git branch --show-current` 确认当前工作区，不依据历史交接记录推断分支或提交状态。目录职责或实验行为变化时同步本文；研究讨论、旧设计和旧结果应保留其历史语义。
 
-PPO 的源码来源、分阶段策略、输出字段和续训约束见 [方案说明](../methods/solutions/ppo_delay/README.md)，共享学习接口见 [learning 说明](../methods/learning/README.md)。PPO 推理组件接受本方案的张量上下文，与 Random 的启发式上下文不同；当前不允许直接混搭。
+新增方案的完整流程见 [方案接入说明](../methods/README.md)，公共方案接口为 `methods/solution.py`。`experiments/cli.py` 通过所选方案声明专用参数，`train.py` 和 `runner.py` 通过方案接口检查和启动训练/评估，不包含 PPO 分支。
+
+PPO 的源码来源、分阶段策略、输出字段和续训约束见 [方案说明](../methods/solutions/ppo/README.md)，共享学习接口见 [learning 说明](../methods/learning/README.md)。PPO 推理组件接受本方案的张量上下文，与 Random 的启发式上下文不同；当前不允许直接混搭。

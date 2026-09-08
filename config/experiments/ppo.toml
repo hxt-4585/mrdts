@@ -1,6 +1,6 @@
 [experiment]
-name = "ppo_delay"
-method_config = "config/methods/ppo_delay.toml"
+name = "ppo"
+method_config = "config/methods/ppo.toml"
 seed = 42
 # Total training epochs = training.member_epochs + training.master_epochs.
 episodes = 130

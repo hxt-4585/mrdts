@@ -1,4 +1,4 @@
-"""Independent live reward/loss monitor for PPO training logs."""
+"""Independent live reward/loss monitor for training logs."""
 
 from __future__ import annotations
 
@@ -41,27 +41,10 @@ def _draw_reward(figure, axes, data):
 
 
 def _draw_losses(figure, axes, data):
-    from .style import MASTER, MEMBER, finish_axis
+    from .training import draw_update_panels
 
-    for axis in axes:
-        axis.clear()
-    for axis, field, title in zip(axes, ("actor_loss", "value_loss"),
-                                  ("Actor loss", "Value loss")):
-        for stage, colour in (("member", MEMBER), ("master", MASTER)):
-            rows = [row for row in data.updates if row.stage == stage]
-            if rows:
-                axis.plot([row.update for row in rows], [getattr(row, field) for row in rows],
-                          color=colour, marker=".", label=stage)
-        if field == "value_loss":
-            axis.set_yscale("symlog", linthresh=1e-4)
-            title += " (symlog)"
-        axis.set_title(title)
-        finish_axis(axis, "Update")
-    from .training import mark_stage_switches
-    mark_stage_switches(axes, data.updates, "update")
-    if data.updates:
-        axes[0].legend(fontsize=7)
-    figure.suptitle("PPO losses" if data.updates else "Waiting for the first completed update")
+    draw_update_panels(figure, data, smooth=False)
+    figure.suptitle("Optimization losses" if data.updates else "Waiting for the first completed update")
     figure.canvas.draw_idle()
 
 
@@ -106,8 +89,8 @@ def main(argv=None):
         plt.close(reward_figure)
         plt.close(loss_figure)
         return
-    reward_figure.canvas.manager.set_window_title(f"PPO reward - {run}")
-    loss_figure.canvas.manager.set_window_title(f"PPO losses - {run}")
+    reward_figure.canvas.manager.set_window_title(f"Training reward - {run}")
+    loss_figure.canvas.manager.set_window_title(f"Training losses - {run}")
     timers = []
     for figure in (reward_figure, loss_figure):
         timer = figure.canvas.new_timer(interval=max(1, int(args.interval * 1000)))

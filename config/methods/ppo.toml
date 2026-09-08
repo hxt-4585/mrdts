@@ -1,5 +1,5 @@
 [method]
-solution = "ppo_delay"
+solution = "ppo"
 
 [method.components]
 ordering = "ers"

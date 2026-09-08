@@ -8,17 +8,15 @@ if __package__ in (None, ""):
 
 from experiments.cli import parse_config
 from experiments.randomness import RandomStreams
-from methods.factory import create_method, create_trainer
+from methods.factory import create_method, create_trainer, validate_method
 from methods.learning.device import check_device
 
 
 def main(argv=None):
     parser, args, config = parse_config(argv, training=True)
     try:
+        validate_method(config.method).validate_config(config, training=True)
         if args.check:
-            if config.method['solution'] == 'ppo_delay':
-                from methods.solutions.ppo_delay.settings import TrainingSettings
-                TrainingSettings.from_config(config)
             streams = RandomStreams.from_config(config)
             create_method(config.method, flight_rng=streams.flight, scheduling_rng=streams.scheduling)
             device, details = check_device(config.device)
