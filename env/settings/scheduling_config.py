@@ -1,7 +1,6 @@
 """时隙调度窗口配置。"""
 
 from dataclasses import dataclass
-import math
 from pathlib import Path
 import tomllib
 
@@ -9,10 +8,6 @@ import tomllib
 @dataclass(frozen=True)
 class SchedulingConfig:
     max_duration_s: float
-
-    def __post_init__(self):
-        if not math.isfinite(self.max_duration_s) or self.max_duration_s <= 0.0:
-            raise ValueError("max_duration_s 必须为有限正数")
 
     @classmethod
     def default(cls) -> "SchedulingConfig":

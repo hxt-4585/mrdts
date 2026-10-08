@@ -13,7 +13,7 @@ from env.communication.channel_model import ChannelModel, LinkType
 from env.communication.routing import RoutePlanner
 from env.contracts import DAGRequest, PlacementDecision
 from env.runtime.channel_queue import DirectedChannelState, TransferJob
-from env.runtime.dag_runtime import DAGRuntime, validate_dag
+from env.runtime.dag_runtime import DAGRuntime
 from env.runtime.server_queue import ServerState
 from env.runtime.slot_result import DAGResult, SlotResult
 from env.runtime.task_runtime import TaskRuntime, TaskStatus, TransferRecord
@@ -66,29 +66,13 @@ class SchedulingRuntime:
         self._slot_start = float(slot_start)
         duration = float(max_duration_s)
         self._deadline = self._slot_start + duration
-        if (not np.isfinite(self._slot_start) or self._slot_start < 0.0
-                or not np.isfinite(duration) or duration <= 0.0
-                or not np.isfinite(self._deadline) or self._deadline <= self._slot_start):
-            raise ValueError("时隙起点必须有限非负，窗口长度必须有限为正")
         self._closed = False
         self._result: SlotResult | None = None
         self.channel_model = channel_model
         self.entity_positions = {
             entity: np.array(position, dtype=float, copy=True) for entity, position in entity_positions.items()
         }
-        ground_entities = {
-            entity for entity in self.entity_positions if entity.kind is EntityKind.GROUND_DEVICE
-        }
-        ground_servers = {entity for entity in servers if entity.kind is EntityKind.GROUND_DEVICE}
-        if ground_servers != ground_entities:
-            raise ValueError("每个地面设备必须恰有一个本地计算服务器")
-        for ground in ground_servers:
-            spec = servers[ground]
-            if len(spec.core_frequencies) != 1 or spec.capacitance_factor != 0.0:
-                raise ValueError("地面设备服务器必须为单核且采用零计算能耗")
         bs_entities = {entity for entity in servers if entity.kind is EntityKind.BS}
-        if len(bs_entities) != 1:
-            raise ValueError("调度运行时必须恰有一个全局 BS")
         self.global_bs = next(iter(bs_entities))
         self.servers = {
             entity: ServerState(entity, tuple(spec.core_frequencies), spec.capacitance_factor)
@@ -113,8 +97,6 @@ class SchedulingRuntime:
         self._next_priority_seq = 0
         self.now = self.slot_start
         if member_regions is not None or ground_owner_members is not None:
-            if member_regions is None or ground_owner_members is None:
-                raise ValueError("member_regions 与 ground_owner_members 必须同时提供")
             self.update_topology(member_regions, ground_owner_members)
 
     @property
@@ -129,15 +111,6 @@ class SchedulingRuntime:
     def closed(self) -> bool:
         return self._closed
 
-    def _require_open(self) -> None:
-        if self.closed:
-            raise RuntimeError("当前时隙运行时已关闭")
-
-    def _require_mutable_topology(self) -> None:
-        self._require_open()
-        if self.tasks or self.now != self.slot_start:
-            raise RuntimeError("提交任务或推进时间后不能修改时隙拓扑")
-
     def submit_dag(
         self,
         dag_id: int,
@@ -148,9 +121,6 @@ class SchedulingRuntime:
         epoch_start: float,
     ) -> tuple[TaskKey, ...]:
         """单 DAG 便捷入口；统一多 DAG 排序请使用 submit_dags。"""
-        self._require_open()
-        if set(placements) != set(range(dag.node_num)):
-            raise ValueError("每个子任务必须恰有一个 placement")
         request = DAGRequest(dag_id, dag, owner_member, ground_device)
         return self.submit_dags(
             [request], {key: placements[key.node_id] for key in request.task_keys}, epoch_start)
@@ -166,33 +136,8 @@ class SchedulingRuntime:
         本批序号压缩为连续编号并追加在已提交批次之后；已经启动的任务
         不参与重新排序。一个 Member 的同批 DAG 应先一起调用排序组件。
         """
-        self._require_open()
         epoch_start = float(epoch_start)
-        if not np.isfinite(epoch_start) or not self.slot_start <= epoch_start < self.deadline:
-            raise ValueError("DAG 提交时刻必须位于当前时隙窗口内")
-        if epoch_start != self.now:
-            raise ValueError("DAG 提交时刻必须等于当前运行时刻；请先推进到提交时刻")
         requests = tuple(requests)
-        if len({request.key for request in requests}) != len(requests):
-            raise ValueError("同一 owner/user/dag_id 的 DAG 重复")
-        for request in requests:
-            validate_dag(request.dag)
-            if request.key in self.dag_runtimes:
-                raise ValueError("同一 owner/user/dag_id 的 DAG 已提交")
-        required = {key for request in requests for key in request.task_keys}
-        if set(placements) != required:
-            raise ValueError("每个子任务必须恰有一个 placement")
-        sequences = [decision.priority_seq for decision in placements.values()]
-        if any(isinstance(seq, bool) or not isinstance(seq, int) or seq < 0 for seq in sequences):
-            raise ValueError("priority_seq 必须为非负整数")
-        if len(set(sequences)) != len(sequences):
-            raise ValueError("同一批次的 priority_seq 不能重复")
-        for request in requests:
-            decisions = {key.node_id: placements[key] for key in request.task_keys}
-            self._validate_submission_topology(request.owner_member, request.ground_device, decisions)
-            for parent, child in request.dag.edges:
-                if decisions[parent].priority_seq >= decisions[child].priority_seq:
-                    raise ValueError("优先顺序必须使前驱先于后继，避免信道队首阻塞死锁")
         order = sorted(placements, key=lambda key: placements[key].priority_seq)
         global_priority = {key: self._next_priority_seq + i for i, key in enumerate(order)}
         # 预备阶段仅修改局部状态，连传输 ID 计数也在成功后才提交。
@@ -232,8 +177,6 @@ class SchedulingRuntime:
         node_keys = {key.node_id: key for key in request.task_keys}
         for node, key in node_keys.items():
             decision = placements[key]
-            if decision.execution_node not in self.servers:
-                raise ValueError(f"执行节点 {decision.execution_node} 没有计算服务器")
             prepared.tasks[key] = TaskRuntime(
                 key=key,
                 execution_node=decision.execution_node,
@@ -279,12 +222,7 @@ class SchedulingRuntime:
         return prepared
 
     def advance_until(self, absolute_time: float) -> None:
-        self._require_open()
         absolute_time = float(absolute_time)
-        if not np.isfinite(absolute_time) or absolute_time > self.deadline:
-            raise ValueError("推进时刻必须有限且不能超过当前时隙截止时刻")
-        if absolute_time < self.now:
-            raise ValueError("不能将运行时倒退到过去")
         while self._events and self._events[0][0] <= absolute_time:
             timestamp = self._events[0][0]
             batch: list[tuple[float, int, str, object]] = []
@@ -305,7 +243,6 @@ class SchedulingRuntime:
         """执行到截止时刻并关闭；重复调用只返回同一份结果。"""
         if not self.closed:
             self.advance_until(self.deadline)
-        assert self._result is not None
         return self._result
 
     def _close_slot(self) -> None:
@@ -358,13 +295,8 @@ class SchedulingRuntime:
 
     def update_entity_positions(self, positions: Mapping[EntityRef, np.ndarray]) -> None:
         """仅在当前时隙提交任务前更新实体位置快照。"""
-        self._require_mutable_topology()
         for entity, position in positions.items():
-            if entity not in self.entity_positions:
-                raise KeyError(f"运行时不认识实体 {entity}")
             position = np.asarray(position, dtype=float)
-            if position.shape != (3,) or not np.isfinite(position).all():
-                raise ValueError("实体位置必须是包含有限数值的 shape=(3,) 向量")
             self.entity_positions[entity] = position.copy()
 
     def update_topology(
@@ -373,35 +305,8 @@ class SchedulingRuntime:
         ground_owner_members: Mapping[EntityRef, EntityRef],
     ) -> None:
         """仅在当前时隙提交任务前刷新 Member 区域和用户关联。"""
-        self._require_mutable_topology()
-        expected_members = {
-            entity for entity in self.servers if entity.kind is EntityKind.MEMBER_UAV
-        }
-        supplied_members = set(member_regions)
-        if supplied_members != expected_members:
-            raise ValueError("拓扑必须为全部 Member UAV 提供区域编号")
-        normalized_regions: dict[EntityRef, int] = {}
-        for member, region_id in member_regions.items():
-            if member.kind is not EntityKind.MEMBER_UAV:
-                raise ValueError("member_regions 的键必须是 Member UAV")
-            if isinstance(region_id, bool) or int(region_id) != region_id or int(region_id) <= 0:
-                raise ValueError("Member UAV 的区域编号必须为正整数")
-            normalized_regions[member] = int(region_id)
-
-        expected_grounds = {
-            entity for entity in self.entity_positions if entity.kind is EntityKind.GROUND_DEVICE
-        }
-        if set(ground_owner_members) != expected_grounds:
-            raise ValueError("拓扑必须为全部地面设备提供关联 Member UAV")
-        normalized_associations: dict[EntityRef, EntityRef] = {}
-        for ground, owner in ground_owner_members.items():
-            if ground.kind is not EntityKind.GROUND_DEVICE:
-                raise ValueError("ground_owner_members 的键必须是地面设备")
-            if owner not in normalized_regions:
-                raise ValueError("地面设备必须关联到已登记的 Member UAV")
-            normalized_associations[ground] = owner
-        self.member_regions = normalized_regions
-        self.ground_owner_members = normalized_associations
+        self.member_regions = {member: int(region_id) for member, region_id in member_regions.items()}
+        self.ground_owner_members = dict(ground_owner_members)
 
     def _append_route(
         self,
@@ -442,9 +347,6 @@ class SchedulingRuntime:
 
     def transfer_duration_s(self, hop: DirectedChannelKey, payload_bits: float) -> float:
         """当前物理快照上的单跳时延，不含排队；排序和实际执行共用。"""
-        self._require_open()
-        if not np.isfinite(payload_bits) or payload_bits < 0:
-            raise ValueError("传输数据量必须为有限非负数")
         transmitter = self.entity_positions[hop.source]
         receiver = self.entity_positions[hop.target]
         power = self.transmit_powers[hop.source]
@@ -458,51 +360,17 @@ class SchedulingRuntime:
         self, owner_member: EntityRef, ground_device: EntityRef,
     ) -> tuple[EntityRef, ...]:
         """自身 Ground、当前同区域 Member 和唯一 BS，供排序与动作选择。"""
-        self._require_open()
-        if self.member_regions is None or self.ground_owner_members is None:
-            raise RuntimeError("提交 DAG 前必须提供当前时隙拓扑")
-        if owner_member.kind is not EntityKind.MEMBER_UAV or owner_member not in self.member_regions:
-            raise ValueError("owner_member 必须是已登记的 Member UAV")
-        if ground_device.kind is not EntityKind.GROUND_DEVICE or ground_device not in self.ground_owner_members:
-            raise ValueError("ground_device 必须是已登记的地面设备")
-        if self.ground_owner_members[ground_device] != owner_member:
-            raise ValueError("地面设备当前关联的 Member UAV 与 owner_member 不一致")
         region = self.member_regions[owner_member]
         members = sorted(member for member, region_id in self.member_regions.items() if region_id == region)
         return (ground_device, *members, self.global_bs)
 
-    def _validate_submission_topology(
-        self,
-        owner_member: EntityRef,
-        ground_device: EntityRef,
-        placements: Mapping[int, PlacementDecision],
-    ) -> None:
-        candidates = self.candidate_execution_nodes(owner_member, ground_device)
-        for decision in placements.values():
-            execution_node = decision.execution_node
-            if execution_node.kind is EntityKind.GROUND_DEVICE:
-                if execution_node != ground_device:
-                    raise ValueError("子任务只能在自身地面设备本地执行")
-            elif execution_node.kind is EntityKind.MEMBER_UAV:
-                if execution_node not in candidates:
-                    raise ValueError("Member UAV 执行节点必须与任务 owner 位于同一区域")
-            elif execution_node.kind is EntityKind.BS:
-                if execution_node != self.global_bs:
-                    raise ValueError("子任务只能卸载到唯一的全局 BS")
-            else:
-                raise ValueError("执行节点只能是自身地面设备、Member UAV 或 BS")
-
     def _default_bandwidth_hz(self, hop: DirectedChannelKey) -> float:
         config = self.channel_model.config
-        if hop.source.kind is EntityKind.GROUND_DEVICE and hop.target.kind is EntityKind.MEMBER_UAV:
-            return config.ground_to_air_bandwidth_mhz * 1e6
-        if hop.source.kind is EntityKind.MEMBER_UAV and hop.target.kind is EntityKind.MEMBER_UAV:
-            return config.air_to_air_bandwidth_mhz * 1e6
-        if hop.source.kind is EntityKind.MEMBER_UAV and hop.target.kind in {EntityKind.BS, EntityKind.GROUND_DEVICE}:
-            return config.air_to_ground_bandwidth_mhz * 1e6
-        if hop.source.kind is EntityKind.BS and hop.target.kind is EntityKind.MEMBER_UAV:
-            return config.ground_to_air_bandwidth_mhz * 1e6
-        raise ValueError(f"没有 {hop} 的默认带宽")
+        return {
+            LinkType.GROUND_TO_AIR: config.ground_to_air_bandwidth_mhz,
+            LinkType.AIR_TO_AIR: config.air_to_air_bandwidth_mhz,
+            LinkType.AIR_TO_GROUND: config.air_to_ground_bandwidth_mhz,
+        }[self._link_type(hop)] * 1e6
 
     @staticmethod
     def _link_type(hop: DirectedChannelKey) -> LinkType:
@@ -514,9 +382,7 @@ class SchedulingRuntime:
 
     def _handle_transfer_finish(self, transfer_id: str, at: float) -> None:
         state = self.channels[self._transfer_channel[transfer_id]]
-        job = state.finish_active(at)
-        if job.transfer_id != transfer_id:
-            raise RuntimeError("传输完成事件与活动信道队首不一致")
+        state.finish_active(at)
         binding = self._transfer_bindings[transfer_id]
         if binding.next_transfer_id is not None:
             next_key = self._transfer_channel[binding.next_transfer_id]

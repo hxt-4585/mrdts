@@ -14,7 +14,7 @@
 
 ## 2. 项目实际问题：变化的是哪些维度
 
-依据当前 `specs/01_system_model.md`、`env/simulator.py`、`env/types.py`、`methods/components/ordering/ers.py` 和配置：
+历史调研依据（ERS 实现现保留在诊断脚本中）：`specs/01_system_model.md`、`env/simulator.py`、`env/types.py`、`scripts/ers.py` 和配置：
 
 | 对象 | 已确定的项目语义 | 对算法设计的影响 |
 |---|---|---|
@@ -301,7 +301,7 @@ Q_i(t+1)=\max(0,Q_i(t)+E_i(t)-\bar E_i).
 
 当前 `env/mdp/` 已预留问题定义位置，适合放置阶段状态、局部观测、候选动作、奖励和仿真器适配；策略网络、rollout 与训练算法保留在方法/训练侧。`Simulator` 继续负责唯一的物理状态修改和运行时生命周期。
 
-需要复用的正式接口是 `Simulator.begin_slot/end_slot`、`ERS(runtime).plan(requests)`、`SchedulingRuntime.submit_dags(...)`。`methods/contracts.py` 的旧单 DAG 协议不应强行限制新的 Member 批量放置接口。
+需要复用的正式接口是 `Simulator.begin_slot/end_slot`、`ERS(runtime).plan(requests)`、`SchedulingRuntime.submit_dags(...)`。旧方法组件协议已移除；后续方法在各自目录内直接实现 Member 批量放置流程。
 
 当前最影响后续方案定稿的前提是 CTDE 是否允许；其次是能量预算含义和无 Member 区域的业务规则。本文已给出可运行基线的默认选择，未将它们伪装成用户已经确认的项目规则。
 

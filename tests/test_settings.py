@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.settings import ChannelConfig, DAGConfig, RegionConfig, UAVConfig, UserConfig
 from env.workload.dag_generator import DAGGenerator
 
@@ -83,7 +83,7 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(member["coverage_radius"], 180.0)
         self.assertEqual(member["transmit_power"], 1.0)
 
-    def test_only_experiment_configs_define_seed(self):
+    def test_environment_configs_do_not_define_seed(self):
         from dataclasses import fields
 
         def contains_seed(value):
@@ -91,8 +91,6 @@ class TestSettings(unittest.TestCase):
                 key == "seed" or contains_seed(item) for key, item in value.items())
 
         for path in (PROJECT_ROOT / "config").rglob("*.toml"):
-            if "experiments" in path.relative_to(PROJECT_ROOT / "config").parts:
-                continue
             with path.open("rb") as stream:
                 self.assertFalse(contains_seed(tomllib.load(stream)), str(path))
         for cls in (RegionConfig, UserConfig, DAGConfig):
@@ -102,12 +100,12 @@ class TestSettings(unittest.TestCase):
         config_path = PROJECT_ROOT / "config" / "dag.toml"
         config = DAGConfig.from_toml(config_path)
 
-        first = DAGGenerator(config, rng=RandomStreams.from_config().dag, py_rng=RandomStreams.from_config().dag_python).generate_single_dag()
+        first = DAGGenerator(config, rng=RandomStreams().dag, py_rng=RandomStreams().dag_python).generate_single_dag()
 
         np.random.random(100)
         for _ in range(100):
             random.random()
-        second = DAGGenerator(config, rng=RandomStreams.from_config().dag, py_rng=RandomStreams.from_config().dag_python).generate_single_dag()
+        second = DAGGenerator(config, rng=RandomStreams().dag, py_rng=RandomStreams().dag_python).generate_single_dag()
 
         self.assertEqual(first.edges, second.edges)
         np.testing.assert_array_equal(first.node_features, second.node_features)

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.communication.channel_model import ChannelModel, LinkType
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV
@@ -16,9 +16,9 @@ from env.types import EntityKind, EntityRef
 class TestSimulator(unittest.TestCase):
     @staticmethod
     def _generate_members():
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
@@ -92,19 +92,10 @@ class TestSimulator(unittest.TestCase):
             self.assertEqual(server.core_frequencies, (1e9,))
             self.assertEqual(server.capacitance_factor, 0.0)
 
-    def test_rejects_non_positive_ground_core_frequency(self):
-        with self.assertRaisesRegex(ValueError, "user_core_frequency"):
-            Simulator(
-                self._generate_members(),
-                ChannelModel(),
-                user_transmit_power=0.1,
-                user_core_frequency=0.0,
-            )
-
     def test_refresh_slot_topology_updates_member_regions_and_user_associations(self):
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)

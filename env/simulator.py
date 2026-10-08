@@ -27,8 +27,6 @@ class Simulator:
         self.channel_model = channel_model
         self.user_transmit_power = user_transmit_power
         self.user_core_frequency = float(user_core_frequency)
-        if not np.isfinite(self.user_core_frequency) or self.user_core_frequency <= 0.0:
-            raise ValueError("user_core_frequency 必须为有限正数")
         self.user_member_ids = None
         self.scheduling_config = scheduling_config if scheduling_config is not None else SchedulingConfig.default()
         self._runtime = None
@@ -41,31 +39,15 @@ class Simulator:
 
     def begin_slot(self, region, user_positions, normalized_actions) -> np.ndarray:
         """飞行、刷新物理拓扑后新建运行时，返回逐 Member 越界标记。"""
-        if self._runtime is not None:
-            raise RuntimeError("当前时隙尚未结束，请先调用 end_slot")
-        previous_positions = self.members.positions.copy()
-        previous_regions = self.members.region_ids.copy()
-        previous_counts = self.members.region_member_counts.copy()
-        previous_associations = self.user_member_ids
-        try:
-            violations = self.members.apply_flight_actions(normalized_actions, region.config.side_length)
-            associations = self.refresh_slot_topology(region, user_positions)
-            runtime = self.create_scheduling_runtime(
-                user_positions, associations, slot_start=self._next_slot_start
-            )
-        except Exception:
-            self.members.positions[:] = previous_positions
-            self.members.region_ids[:] = previous_regions
-            self.members.region_member_counts[:] = previous_counts
-            self.user_member_ids = previous_associations
-            raise
-        self._runtime = runtime
+        violations = self.members.apply_flight_actions(normalized_actions, region.config.side_length)
+        associations = self.refresh_slot_topology(region, user_positions)
+        self._runtime = self.create_scheduling_runtime(
+            user_positions, associations, slot_start=self._next_slot_start
+        )
         return violations
 
     def end_slot(self) -> SlotResult:
         """完成截止结算并释放运行时，只返回不含队列的结果。"""
-        if self._runtime is None:
-            raise RuntimeError("没有可结束的活动时隙")
         result = self._runtime.finish_slot()
         self._next_slot_start = result.slot_end
         self._runtime = None
@@ -109,17 +91,11 @@ class Simulator:
 
     def create_scheduling_runtime(self, user_positions, user_member_ids, *, slot_start=0.0):
         """创建绑定单个窗口的运行时；连续时隙应使用 begin_slot/end_slot。"""
-        if self._runtime is not None:
-            raise RuntimeError("当前时隙尚未结束，不能创建替代运行时")
         from env.types import EntityKind, EntityRef
         from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 
         user_positions = np.asarray(user_positions, dtype=float)
         user_member_ids = np.asarray(user_member_ids, dtype=int)
-        if user_positions.ndim != 2 or user_positions.shape[1] != 3:
-            raise ValueError("user_positions 的 shape 必须为 (N, 3)")
-        if user_member_ids.shape != (len(user_positions),):
-            raise ValueError("user_member_ids 的 shape 必须为 (N,)")
         positions = {}
         powers = {}
         servers = {}
@@ -137,8 +113,6 @@ class Simulator:
             tuple(self.core_frequencies(self.bs_index)), self.members.config.member_capacitance_factor
         )
         for user_id, position in enumerate(user_positions):
-            if not 0 <= user_member_ids[user_id] < self.bs_index:
-                raise ValueError("每个用户必须关联一个有效 Member UAV")
             ground = EntityRef(EntityKind.GROUND_DEVICE, user_id)
             positions[ground] = position
             powers[ground] = self.user_transmit_power
@@ -170,14 +144,8 @@ class Simulator:
 
         用户固定在地面；每位用户关联到其当前区域内距离最近的 Member UAV。
         """
-        if self._runtime is not None:
-            raise RuntimeError("当前时隙尚未结束，不能刷新物理拓扑")
 
         user_positions = np.asarray(user_positions, dtype=float)
-        if user_positions.ndim != 2 or user_positions.shape[1] != 3:
-            raise ValueError("user_positions 的 shape 必须为 (N, 3)")
-        if not np.isfinite(user_positions).all():
-            raise ValueError("user_positions 必须全部为有限数值")
 
         member_ids = np.arange(self.bs_index, dtype=np.int32)
         member_region_ids = np.array(
@@ -190,8 +158,6 @@ class Simulator:
         associations = np.empty(len(user_positions), dtype=np.int32)
         for user_id, (position, region_id) in enumerate(zip(user_positions, user_region_ids)):
             candidates = member_ids[member_region_ids == region_id]
-            if len(candidates) == 0:
-                raise RuntimeError(f"区域 {region_id} 当前没有可关联的 Member UAV")
             horizontal_distances = np.linalg.norm(
                 self.members.positions[candidates, :2] - position[:2], axis=1
             )

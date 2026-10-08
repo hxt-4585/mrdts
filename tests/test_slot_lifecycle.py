@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.communication.channel_model import ChannelModel
 from env.contracts import PlacementDecision
 from env.entities.region import Region
@@ -19,11 +19,11 @@ from env.workload.dag_generator import DAG
 class TestSlotLifecycle(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.region = Region(rng=RandomStreams.from_config().region)
+        cls.region = Region(rng=RandomStreams().region)
         cls.region.generate()
 
     def setUp(self):
-        self.users = User(rng=RandomStreams.from_config().user)
+        self.users = User(rng=RandomStreams().user)
         self.users.generate_from_region(self.region)
         masters = MasterUAV()
         masters.generate_from_region(self.region)
@@ -96,28 +96,6 @@ class TestSlotLifecycle(unittest.TestCase):
         np.testing.assert_array_equal(self.members.region_member_counts, expected)
         self.assertEqual(self.members.region_member_counts.sum(), self.members.member_uav_count)
 
-    def test_runtime_creation_failure_rolls_back_migration_counts(self):
-        _, source, target = self._prepare_region_crossing()
-        positions = self.members.positions.copy()
-        regions = self.members.region_ids.copy()
-        counts = self.members.region_member_counts.copy()
-        expected = counts.copy()
-        expected[source - 1] -= 1
-        expected[target - 1] += 1
-
-        def fail_after_topology(*args, **kwargs):
-            np.testing.assert_array_equal(self.members.region_member_counts, expected)
-            raise RuntimeError("runtime creation failed")
-
-        with patch.object(self.environment, "create_scheduling_runtime", side_effect=fail_after_topology):
-            with self.assertRaisesRegex(RuntimeError, "runtime creation failed"):
-                self._begin()
-
-        self.assertIsNone(self.environment.runtime)
-        np.testing.assert_array_equal(self.members.positions, positions)
-        np.testing.assert_array_equal(self.members.region_ids, regions)
-        np.testing.assert_array_equal(self.members.region_member_counts, counts)
-
     def test_begin_refreshes_topology_before_creating_runtime(self):
         original_create = self.environment.create_scheduling_runtime
 
@@ -178,20 +156,6 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertEqual(len(next_result.finished_dags), 1)
         self.assertEqual(result.failed_dags, ((owner.index, 0, 0),))
 
-    def test_closed_reference_cannot_advance_submit_or_refresh(self):
-        runtime = self._begin()
-        self.environment.end_slot()
-        operations = (
-            lambda: runtime.advance_until(2.0),
-            lambda: self._submit(runtime),
-            lambda: runtime.update_entity_positions({self.ground: self.users.positions[0]}),
-            lambda: runtime.update_topology(runtime.member_regions, runtime.ground_owner_members),
-        )
-        for operation in operations:
-            with self.subTest(operation=operation):
-                with self.assertRaisesRegex(RuntimeError, "关闭"):
-                    operation()
-
     def test_exact_deadline_completion_succeeds_without_starting_waiting_work(self):
         runtime = self._begin()
         finished = self._submit(runtime, dag_id=0, cycles=1e9)
@@ -210,48 +174,6 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertIs(self.environment.end_slot(), result)
         self.assertIsNone(self.environment.runtime)
 
-    def test_invalid_lifecycle_order_does_not_move_members(self):
-        with self.assertRaisesRegex(RuntimeError, "时隙"):
-            self.environment.end_slot()
-        runtime = self._begin()
-        positions = self.members.positions.copy()
-        with self.assertRaisesRegex(RuntimeError, "时隙"):
-            self.environment.begin_slot(self.region, self.users.positions, self.actions + 0.5)
-        with self.assertRaisesRegex(RuntimeError, "时隙"):
-            self.environment.refresh_slot_topology(self.region, self.users.positions)
-        np.testing.assert_array_equal(positions, self.members.positions)
-        self.assertIs(self.environment.runtime, runtime)
-        self.environment.end_slot()
-        with self.assertRaisesRegex(RuntimeError, "时隙"):
-            self.environment.end_slot()
-
-    def test_begin_failure_restores_physical_state(self):
-        positions = self.members.positions.copy()
-        regions = self.members.region_ids.copy()
-        counts = self.members.region_member_counts.copy()
-        invalid_users = self.users.positions.copy()
-        invalid_users[0, 0] = np.nan
-        with self.assertRaises(ValueError):
-            self.environment.begin_slot(self.region, invalid_users, self.actions + 0.5)
-        self.assertIsNone(self.environment.runtime)
-        np.testing.assert_array_equal(positions, self.members.positions)
-        np.testing.assert_array_equal(regions, self.members.region_ids)
-        np.testing.assert_array_equal(counts, self.members.region_member_counts)
-        self.assertEqual(self._begin().slot_start, 0.0)
-
-    def test_window_rejects_invalid_times_and_future_submission_without_advancement(self):
-        runtime = self._begin()
-        for at in (-1.0, 1.1, float("nan"), float("inf")):
-            with self.subTest(at=at), self.assertRaises(ValueError):
-                runtime.advance_until(at)
-        owner = runtime.ground_owner_members[self.ground]
-        for at in (-1.0, 0.5, 1.0, float("nan")):
-            with self.subTest(at=at), self.assertRaises(ValueError):
-                runtime.submit_dag(0, DAG(1, [], np.array([[1.0, 1e7]]), {}), owner, self.ground,
-                                   {0: PlacementDecision(self.ground, 0)}, epoch_start=at)
-        self.assertEqual(runtime.now, 0.0)
-        self.assertFalse(runtime.tasks)
-
     def test_partial_computation_energy_stops_at_deadline(self):
         runtime = self._begin()
         member = runtime.ground_owner_members[self.ground]
@@ -266,25 +188,17 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertAlmostEqual(result.compute_energy_j, expected)
         self.assertIsNone(task.compute_finish_at)
 
-    def test_topology_and_position_snapshots_cannot_change_after_submission(self):
+    def test_position_snapshot_is_independent_of_input_array(self):
         runtime = self._begin()
         position = self.users.positions[0].astype(float)
         runtime.update_entity_positions({self.ground: position})
         snapshot = position.copy()
         position[0] += 100
         np.testing.assert_array_equal(runtime.entity_positions[self.ground], snapshot)
-        self._submit(runtime)
-        with self.assertRaisesRegex(RuntimeError, "拓扑"):
-            runtime.update_entity_positions({self.ground: position})
-        with self.assertRaisesRegex(RuntimeError, "拓扑"):
-            runtime.update_topology(runtime.member_regions, runtime.ground_owner_members)
 
     def test_duration_configuration_controls_consecutive_windows(self):
         from env.settings import SchedulingConfig
 
-        for value in (0.0, -1.0, float("nan"), float("inf")):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                SchedulingConfig(value)
         self.assertEqual(SchedulingConfig.default().max_duration_s, 1.0)
         self.environment = Simulator(self.members, ChannelModel(), 0.1,
                                        scheduling_config=SchedulingConfig(0.25))

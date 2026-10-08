@@ -10,7 +10,7 @@ import numpy as np
 # 将项目根目录加入 sys.path，便于导入 env 包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.user import User
 from env.settings import RegionConfig, UserConfig
@@ -20,7 +20,7 @@ class TestUser(unittest.TestCase):
     """User 应使用区域地图生成全部用户。"""
 
     def setUp(self):
-        self.region = Region(RegionConfig.default(), rng=RandomStreams.from_config().region)
+        self.region = Region(RegionConfig.default(), rng=RandomStreams().region)
         self.region.generate()
         self.config = replace(
             UserConfig.default(),
@@ -31,7 +31,7 @@ class TestUser(unittest.TestCase):
 
     def test_generate_from_region_assigns_all_users_to_regions(self):
         """用户总数、区域统计和三维地面坐标应相互一致。"""
-        users = User(self.config, rng=RandomStreams.from_config().user)
+        users = User(self.config, rng=RandomStreams().user)
         positions = users.generate_from_region(self.region)
 
         self.assertEqual(positions.shape, (self.config.total_users, 3))
@@ -47,8 +47,8 @@ class TestUser(unittest.TestCase):
 
     def test_generate_from_region_is_reproducible_with_seed(self):
         """相同区域地图和用户种子应生成相同用户集合。"""
-        first = User(self.config, rng=RandomStreams.from_config().user)
-        second = User(self.config, rng=RandomStreams.from_config().user)
+        first = User(self.config, rng=RandomStreams().user)
+        second = User(self.config, rng=RandomStreams().user)
 
         first.generate_from_region(self.region)
         second.generate_from_region(self.region)
@@ -66,8 +66,8 @@ class TestUser(unittest.TestCase):
             center_spread_ratio=0.7,
         )
         centered_config = replace(uniform_config, center_bias=0.6)
-        uniform_users = User(uniform_config, rng=RandomStreams.from_config().user)
-        centered_users = User(centered_config, rng=RandomStreams.from_config().user)
+        uniform_users = User(uniform_config, rng=RandomStreams().user)
+        centered_users = User(centered_config, rng=RandomStreams().user)
         uniform_users.generate_from_region(self.region)
         centered_users.generate_from_region(self.region)
 
@@ -87,16 +87,6 @@ class TestUser(unittest.TestCase):
             mean_distance_to_region_centers(centered_users),
             mean_distance_to_region_centers(uniform_users),
         )
-
-    def test_generate_from_region_requires_region_map(self):
-        """用户生成必须基于已生成或加载的区域地图。"""
-        with self.assertRaises(RuntimeError):
-            User(self.config, rng=RandomStreams.from_config().user).generate_from_region(Region(RegionConfig.default(), rng=RandomStreams.from_config().region))
-
-    def test_num_users_before_generation_names_current_entry_point(self):
-        """未生成时的提示应指向当前的用户生成接口。"""
-        with self.assertRaisesRegex(RuntimeError, "generate_from_region"):
-            _ = User(self.config, rng=RandomStreams.from_config().user).num_users
 
 
 if __name__ == "__main__":

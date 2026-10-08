@@ -48,22 +48,16 @@ class TaskRuntime:
         return self._update_data_ready()
 
     def mark_predecessor_arrived(self, predecessor: TaskKey, at: float) -> bool:
-        if predecessor not in self.predecessors:
-            raise KeyError(f"{predecessor} 不是任务 {self.key} 的前驱")
         self.predecessor_arrival_at[predecessor] = float(at)
         return self._update_data_ready()
 
     def mark_compute_started(self, core_id: int, at: float, energy_j: float) -> None:
-        if self.status is not TaskStatus.QUEUED_COMPUTE:
-            raise ValueError("只有已进入计算队列的任务可以启动")
         self.status = TaskStatus.RUNNING
         self.execution_core_id = core_id
         self.compute_start_at = float(at)
         self.compute_energy_j = float(energy_j)
 
     def mark_compute_finished(self, at: float) -> None:
-        if self.status is not TaskStatus.RUNNING:
-            raise ValueError("只有运行中的任务可以完成")
         self.status = TaskStatus.FINISHED
         self.compute_finish_at = float(at)
 

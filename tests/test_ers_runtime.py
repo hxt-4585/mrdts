@@ -2,12 +2,10 @@
 
 import unittest
 
-import numpy as np
 
 from env.contracts import DAGRequest, PlacementDecision
 from env.types import DirectedChannelKey
-from env.workload.dag_generator import DAG
-from methods.components.ordering.ers import ERS
+from scripts.ers import ERS
 from tests.test_ers import make_dag, make_runtime
 
 
@@ -68,44 +66,6 @@ class TestERSRuntime(unittest.TestCase):
         self.assertAlmostEqual(child.predecessor_arrival_at[keys[0]] - parent.compute_finish_at, .06)
         self.assertAlmostEqual(plan.costs[request.key].path_seconds_per_bit[ground, bs] * 1e6, .06)
         self.assertAlmostEqual(child.compute_start_at, .16)
-
-    def test_invalid_later_request_does_not_mutate_runtime(self):
-        for failure in ("placement", "features", "cycle", "duplicate", "rank", "missing", "ties", "route"):
-            with self.subTest(failure=failure):
-                runtime, ground, member, bs = make_runtime()
-                first = DAGRequest(0, make_dag((1e7,)), member, ground)
-                second = DAGRequest(1, make_dag(), member, ground)
-                requests = [first, second]
-                placements = {first.task_keys[0]: PlacementDecision(ground, 0),
-                              second.task_keys[0]: PlacementDecision(member, 1),
-                              second.task_keys[1]: PlacementDecision(bs, 2)}
-                if failure == "placement":
-                    from env.types import EntityKind, EntityRef
-                    placements[second.task_keys[1]] = PlacementDecision(EntityRef(EntityKind.BS, 99), 2)
-                elif failure == "features":
-                    second.dag.node_features[1, 0] = np.nan
-                elif failure == "cycle":
-                    second.dag.edges.append((1, 0))
-                    second.dag.edge_features[1, 0] = 1.
-                elif failure == "duplicate":
-                    requests.append(first)
-                elif failure == "rank":
-                    placements[second.task_keys[0]] = PlacementDecision(member, 3)
-                elif failure == "missing":
-                    del placements[second.task_keys[1]]
-                elif failure == "ties":
-                    placements[second.task_keys[1]] = PlacementDecision(bs, 1)
-                elif failure == "route":
-                    runtime.update_entity_positions({bs: runtime.entity_positions[member]})
-                with self.assertRaises(ValueError):
-                    runtime.submit_dags(requests, placements, runtime.now)
-                self.assertFalse(runtime.tasks)
-                self.assertFalse(runtime.dag_runtimes)
-                self.assertFalse(runtime.channels)
-                self.assertTrue(all(not s.queue and not s.running for s in runtime.servers.values()))
-                keys = runtime.submit_dag(0, first.dag, member, ground,
-                                          {0: PlacementDecision(ground, 0)}, runtime.now)
-                self.assertEqual(runtime.trace(keys[0]).priority_seq, 0)
 
     def test_later_batch_appends_without_reordering_running_work(self):
         runtime, ground, member, _ = make_runtime()

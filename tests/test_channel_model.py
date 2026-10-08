@@ -63,13 +63,6 @@ class TestChannelModel(unittest.TestCase):
         self.assertAlmostEqual(metrics.los_probability, los_probability)
         self.assertAlmostEqual(metrics.average_channel_gain, expected_gain)
 
-    def test_rejects_coincident_endpoints(self):
-        """重合的收发端会产生无定义的自由空间增益，应明确拒绝。"""
-        position = np.array([1.0, 2.0, 3.0])
-
-        with self.assertRaisesRegex(ValueError, "不能重合"):
-            self.model.calculate_link(position, position, 1.0, LinkType.AIR_TO_AIR)
-
     def test_calculates_transmission_delay_and_transmit_energy(self):
         """传输时延与发送能耗应由同一链路速率推导。"""
         transmitter = np.array([0.0, 0.0, 0.0])

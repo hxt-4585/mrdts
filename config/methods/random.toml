@@ -1,7 +1,0 @@
-[method]
-solution = "random"
-
-[method.components]
-ordering = "ers"
-flight = "random"
-scheduling = "random"

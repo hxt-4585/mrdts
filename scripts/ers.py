@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Iterable, Mapping
 import numpy as np
 
 from env.contracts import DAGRequest
-from env.runtime.dag_runtime import topological_order, validate_dag
+from env.runtime.dag_runtime import topological_order
 from env.types import DirectedChannelKey, EntityRef, TaskKey
 from env.workload.dag_generator import DAG
 
@@ -60,12 +60,8 @@ class ERS:
         average_edge_comm_s: Mapping[tuple[int, int], float],
     ) -> dict[int, float]:
         order = topological_order(dag)
-        if set(average_compute_s) != set(order) or set(average_edge_comm_s) != set(dag.edges):
-            raise ValueError("平均成本必须覆盖 DAG 的全部节点和边")
         compute = {node: float(value) for node, value in average_compute_s.items()}
         comm = {edge: float(value) for edge, value in average_edge_comm_s.items()}
-        if any(not math.isfinite(value) or value < 0 for value in (*compute.values(), *comm.values())):
-            raise ValueError("平均时延必须为有限非负数")
         successors = {node: [] for node in order}
         for parent, child in dag.edges:
             successors[parent].append(child)
@@ -73,8 +69,6 @@ class ERS:
         for node in reversed(order):
             values[node] = compute[node] + max(
                 (comm[node, child] + values[child] for child in successors[node]), default=0.)
-            if not math.isfinite(values[node]):
-                raise ValueError("rank 时延溢出")
         return {node: values[node] for node in range(dag.node_num)}
 
     @classmethod
@@ -91,8 +85,6 @@ class ERS:
 
     def plan(self, requests: Iterable[DAGRequest]) -> ERSPlan:
         requests = tuple(requests)
-        if len({request.key for request in requests}) != len(requests):
-            raise ValueError("同一 owner/user/dag_id 的 DAG 重复")
         ranks, costs, topo_positions = {}, {}, {}
         members: set[EntityRef] = set()
         locations: dict[tuple[EntityRef, EntityRef], _LocationCosts] = {}
@@ -120,8 +112,6 @@ class ERS:
     ) -> _LocationCosts:
         candidates = self.runtime.candidate_execution_nodes(request.owner_member, request.ground_device)
         frequencies = {p: self.runtime.servers[p].core_frequencies for p in candidates}
-        if any(not math.isfinite(f) or f <= 0 for cores in frequencies.values() for f in cores):
-            raise ValueError("核心频率必须为有限正数")
         core_count = sum(len(cores) for cores in frequencies.values())
         seconds_per_cycle = math.fsum(1 / f for cores in frequencies.values() for f in cores) / core_count
         paths = {}
@@ -140,7 +130,6 @@ class ERS:
 
     @staticmethod
     def _task_costs(dag: DAG, locations: _LocationCosts) -> AverageCosts:
-        validate_dag(dag)
         features = np.asarray(dag.node_features, dtype=float)
         return AverageCosts(
             locations.candidates, dict(locations.paths),

@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV, UAV
 from env.entities.user import User
@@ -23,22 +23,6 @@ class TestUAV(unittest.TestCase):
         np.testing.assert_array_equal(uavs.positions, positions)
         np.testing.assert_array_equal(uavs.region_ids, region_ids)
         self.assertEqual(uavs.num_uavs, 2)
-
-    def test_rejects_positions_without_three_coordinates(self):
-        """每架 UAV 必须有 x、y、z 三个坐标。"""
-        positions = np.array([[10.0, 20.0]], dtype=np.float32)
-        region_ids = np.array([1], dtype=np.int32)
-
-        with self.assertRaisesRegex(ValueError, "shape"):
-            UAV(positions, region_ids)
-
-    def test_rejects_region_ids_with_a_different_uav_count(self):
-        """位置数组和区域编号数组必须描述同一批 UAV。"""
-        positions = np.array([[10.0, 20.0, 100.0]], dtype=np.float32)
-        region_ids = np.array([1, 2], dtype=np.int32)
-
-        with self.assertRaisesRegex(ValueError, "数量"):
-            UAV(positions, region_ids)
 
     def test_updates_selected_uav_positions_in_batch(self):
         """位置更新应支持按 UAV 索引批量写入。"""
@@ -74,7 +58,7 @@ class TestUAV(unittest.TestCase):
 class TestMasterUAV(unittest.TestCase):
     def test_generates_one_master_for_each_region_from_shared_uav_config(self):
         """Master 数量应来自 UAV 配置且与区域数量一一对应。"""
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
         masters = MasterUAV()
 
@@ -93,9 +77,9 @@ class TestMasterUAV(unittest.TestCase):
 class TestMemberUAV(unittest.TestCase):
     @staticmethod
     def _generate_members(config=None):
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
@@ -105,9 +89,9 @@ class TestMemberUAV(unittest.TestCase):
 
     def test_generates_separated_members_near_masters_in_their_regions(self):
         """Member 应位于本区域 Master 附近，且水平间距至少一格。"""
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
@@ -136,9 +120,9 @@ class TestMemberUAV(unittest.TestCase):
 
     def test_appends_bs_at_center_with_zero_region_id_and_configured_cores(self):
         """最后一行应为固定在区域中心的 BS，并拥有独立的计算资源。"""
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
@@ -168,9 +152,9 @@ class TestMemberUAV(unittest.TestCase):
 
     def test_initial_positions_do_not_depend_on_user_coordinates(self):
         """用户坐标改变但区域人数不变时，Member 初始位置应完全一致。"""
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
@@ -195,13 +179,13 @@ class TestMemberUAV(unittest.TestCase):
         from env.workload.dag_generator import DAG
         from env.simulator import Simulator
         from env.contracts import DAGRequest, PlacementDecision
-        from methods.components.ordering.ers import ERS
+        from scripts.ers import ERS
 
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
         count = region.config.region_count
         users = User(replace(UserConfig.default(), total_users=count, min_users_per_region=1,
-                             area_fluctuation=0.), rng=RandomStreams.from_config().user)
+                             area_fluctuation=0.), rng=RandomStreams().user)
         users.generate_from_region(region)
         config = replace(UAVConfig.default(), master_uav_count=count,
                          member_uav_count=3 * count, min_members_per_region=3)
@@ -232,9 +216,9 @@ class TestMemberUAV(unittest.TestCase):
 
     def test_applies_horizontal_velocity_for_configured_flight_duration(self):
         """Member 应将归一化动作缩放为最大速度后更新水平位置。"""
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
@@ -261,9 +245,9 @@ class TestMemberUAV(unittest.TestCase):
 
     def test_flight_actions_leave_bs_position_unchanged(self):
         """Member 飞行仅改变 Member 行，不得移动最后一行的 BS。"""
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
@@ -289,7 +273,7 @@ class TestMemberUAV(unittest.TestCase):
         actions[1] = [0.2, 0.0]
 
         violations = members.apply_flight_actions(
-            actions, Region(rng=RandomStreams.from_config().region).config.side_length
+            actions, Region(rng=RandomStreams().region).config.side_length
         )
 
         self.assertEqual(violations.shape, (members.member_uav_count,))

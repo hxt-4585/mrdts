@@ -18,20 +18,6 @@ class ChannelConfig:
     los_alpha: float
     los_beta: float
 
-    def __post_init__(self):
-        if min(
-            self.ground_to_air_bandwidth_mhz,
-            self.air_to_air_bandwidth_mhz,
-            self.air_to_ground_bandwidth_mhz,
-            self.reference_channel_gain,
-            self.noise_power_w,
-            self.los_alpha,
-            self.los_beta,
-        ) <= 0.0:
-            raise ValueError("信道带宽、增益、噪声功率和 LoS 参数必须为正数")
-        if not 0.0 < self.nlos_attenuation_factor <= 1.0:
-            raise ValueError("nlos_attenuation_factor 必须位于 (0, 1]")
-
     @classmethod
     def default(cls) -> "ChannelConfig":
         """加载项目默认通信配置。"""

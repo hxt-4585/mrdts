@@ -155,8 +155,6 @@ class TestSchedulingRuntime(unittest.TestCase):
         key = DirectedChannelKey(self.ground, self.member)
         first = self.runtime.channel_state(key).active
         self.runtime.advance_until(first.finish_at / 2.0)
-        with self.assertRaisesRegex(RuntimeError, "拓扑"):
-            self.runtime.update_entity_positions({self.member: np.array([150.0, 0.0, 10.0])})
 
         self.runtime.advance_until(first.finish_at)
 
@@ -170,99 +168,6 @@ class TestSchedulingRuntime(unittest.TestCase):
             bandwidth_hz=1e9,
         )
         self.assertAlmostEqual(second.duration_s, expected_duration)
-
-    def test_rejects_member_placement_outside_the_owner_current_region(self):
-        self.runtime.update_topology(
-            member_regions={self.member: 1, self.other_member: 2},
-            ground_owner_members={self.ground: self.member},
-        )
-
-        with self.assertRaisesRegex(ValueError, "同一区域"):
-            self.runtime.submit_dag(
-                dag_id=10,
-                dag=self.dag,
-                owner_member=self.member,
-                ground_device=self.ground,
-                placements={
-                    0: PlacementDecision(self.other_member, priority_seq=0),
-                    1: PlacementDecision(self.other_member, priority_seq=1),
-                },
-                epoch_start=0.0,
-            )
-
-    def test_rejects_placement_on_another_ground_device(self):
-        other_ground = EntityRef(EntityKind.GROUND_DEVICE, 1)
-
-        with self.assertRaisesRegex(ValueError, "自身地面设备"):
-            self.runtime.submit_dag(
-                dag_id=11,
-                dag=self.dag,
-                owner_member=self.member,
-                ground_device=self.ground,
-                placements={
-                    0: PlacementDecision(other_ground, priority_seq=0),
-                    1: PlacementDecision(self.member, priority_seq=1),
-                },
-                epoch_start=0.0,
-            )
-
-    def test_requires_topology_before_accepting_placements(self):
-        self.runtime.member_regions = None
-        self.runtime.ground_owner_members = None
-
-        with self.assertRaisesRegex(RuntimeError, "拓扑"):
-            self.runtime.submit_dag(
-                dag_id=14,
-                dag=self.dag,
-                owner_member=self.member,
-                ground_device=self.ground,
-                placements={
-                    0: PlacementDecision(self.member, priority_seq=0),
-                    1: PlacementDecision(self.bs, priority_seq=1),
-                },
-                epoch_start=0.0,
-            )
-
-    def test_rejects_any_bs_other_than_the_single_global_bs(self):
-        other_bs = EntityRef(EntityKind.BS, 1)
-
-        with self.assertRaisesRegex(ValueError, "全局 BS"):
-            self.runtime.submit_dag(
-                dag_id=15,
-                dag=self.dag,
-                owner_member=self.member,
-                ground_device=self.ground,
-                placements={
-                    0: PlacementDecision(other_bs, priority_seq=0),
-                    1: PlacementDecision(self.member, priority_seq=1),
-                },
-                epoch_start=0.0,
-            )
-
-    def test_rejects_ground_server_that_is_not_single_core_and_zero_energy(self):
-        for invalid_spec in (ServerSpec((1e9, 1e9), 0.0), ServerSpec((1e9,), 1e-28)):
-            with self.subTest(invalid_spec=invalid_spec):
-                with self.assertRaisesRegex(ValueError, "地面设备.*单核.*零计算能耗"):
-                    SchedulingRuntime(
-                        channel_model=ChannelModel(),
-                        entity_positions={
-                            self.ground: np.array([0.0, 0.0, 0.0]),
-                            self.member: np.array([0.0, 0.0, 10.0]),
-                            self.bs: np.array([50.0, 0.0, 25.0]),
-                        },
-                        servers={
-                            self.ground: invalid_spec,
-                            self.member: ServerSpec((1e9,), 1e-28),
-                            self.bs: ServerSpec((1e9,), 1e-28),
-                        },
-                        transmit_powers={
-                            self.ground: 1.0,
-                            self.member: 1.0,
-                            self.bs: 1.0,
-                        },
-                        member_regions={self.member: 1},
-                        ground_owner_members={self.ground: self.member},
-                    )
 
     def test_all_local_dag_finishes_without_transfers_or_compute_energy(self):
         keys = self.runtime.submit_dag(

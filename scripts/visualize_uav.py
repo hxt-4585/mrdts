@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV
 from env.entities.user import User
@@ -28,10 +28,6 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 def draw_uav_distribution(region, users, masters, members, ax):
     """绘制区域、用户与两类 UAV 的初始二维位置。"""
-    if region.region_map is None:
-        raise RuntimeError("区域地图尚未生成，请先调用 Region.generate()")
-    if any(entity.positions is None for entity in (users, masters, members)):
-        raise RuntimeError("用户与 UAV 必须先完成生成")
 
     config = region.config
     side_length = config.side_length
@@ -128,9 +124,9 @@ def draw_uav_distribution(region, users, masters, members, ax):
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    region = Region(rng=RandomStreams.from_config().region)
+    region = Region(rng=RandomStreams().region)
     region.generate()
-    users = User(rng=RandomStreams.from_config().user)
+    users = User(rng=RandomStreams().user)
     users.generate_from_region(region)
     masters = MasterUAV()
     masters.generate_from_region(region)

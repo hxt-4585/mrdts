@@ -7,7 +7,6 @@
 import argparse
 from dataclasses import replace
 import json
-import math
 from pathlib import Path
 import sys
 
@@ -15,7 +14,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.communication.channel_model import ChannelModel
 from env.contracts import DAGRequest, PlacementDecision
 from env.entities.region import Region
@@ -26,7 +25,7 @@ from env.settings import UAVConfig, UserConfig
 from env.simulator import Simulator
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
-from methods.components.ordering.ers import ERS
+from scripts.ers import ERS
 
 
 def entity_id(entity):
@@ -39,11 +38,11 @@ def task_id(key):
 
 
 def make_scene():
-    region = Region(rng=RandomStreams.from_config().region)
+    region = Region(rng=RandomStreams().region)
     region.generate()
     count = region.config.region_count
     users = User(replace(UserConfig.default(), total_users=count, min_users_per_region=1,
-                         area_fluctuation=0.0), rng=RandomStreams.from_config().user)
+                         area_fluctuation=0.0), rng=RandomStreams().user)
     users.generate_from_region(region)
     config = replace(UAVConfig.default(), master_uav_count=count,
                      member_uav_count=2 * count, min_members_per_region=2)
@@ -68,11 +67,7 @@ def make_scene():
 
 def build_replay(load_scale=1.0, initial_region=1):
     """执行 begin_slot → ERS.plan → submit_dags → end_slot，提取真实回放记录。"""
-    if not math.isfinite(load_scale) or load_scale <= 0:
-        raise ValueError("load_scale 必须是有限正数")
     region, users, members = make_scene()
-    if not 1 <= initial_region <= region.config.region_count:
-        raise ValueError(f"region 必须位于 1..{region.config.region_count}")
     environment = Simulator(members, ChannelModel(), users.config.transmit_power,
                               users.config.core_frequency)
     violations = environment.begin_slot(region, users.positions,
@@ -198,8 +193,6 @@ def build_replay(load_scale=1.0, initial_region=1):
 
 def write_replay(data, output):
     output = Path(output).resolve()
-    if output.suffix.lower() != ".html":
-        raise ValueError("输出路径必须以 .html 结尾")
     template = Path(__file__).with_name("templates") / "scheduling_replay.html"
     payload = json.dumps(data, ensure_ascii=False, allow_nan=False)
     html = template.read_text(encoding="utf-8").replace("__REPLAY_DATA__", payload.replace("<", "\\u003c"))

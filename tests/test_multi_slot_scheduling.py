@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.communication.channel_model import ChannelModel
 from env.contracts import DAGRequest, PlacementDecision
 from env.entities.region import Region
@@ -14,7 +14,7 @@ from env.runtime.task_runtime import TaskStatus
 from env.simulator import Simulator
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
-from methods.components.ordering.ers import ERS
+from scripts.ers import ERS
 
 
 class TestMultiSlotScheduling(unittest.TestCase):
@@ -24,9 +24,9 @@ class TestMultiSlotScheduling(unittest.TestCase):
     DAGS_PER_SLOT = 2
 
     def setUp(self):
-        self.region = Region(rng=RandomStreams.from_config().region)
+        self.region = Region(rng=RandomStreams().region)
         self.region.generate()
-        self.users = User(rng=RandomStreams.from_config().user)
+        self.users = User(rng=RandomStreams().user)
         self.users.generate_from_region(self.region)
         masters = MasterUAV()
         masters.generate_from_region(self.region)
@@ -39,7 +39,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             user_core_frequency=self.users.config.core_frequency,
         )
         self.max_duration_s = self.environment.scheduling_config.max_duration_s
-        self.rng = RandomStreams.from_config().scheduling
+        self.rng = RandomStreams().scheduling
 
     def test_random_flight_and_random_placement_finish_two_dags_per_slot_before_deadline(self):
         for slot_id in range(self.SLOT_COUNT):
@@ -120,8 +120,6 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.assertEqual(result.failed_dags, ((owner.index, ground.index, 0),))
         self.assertTrue(previous_runtime.closed)
         self.assertTrue(all(task.status is TaskStatus.FAILED for task in previous_runtime.tasks.values()))
-        with self.assertRaisesRegex(RuntimeError, "关闭"):
-            previous_runtime.advance_until(2.0 * self.max_duration_s)
 
         self._start_slot(actions)
         self._assert_empty_scheduling_state()

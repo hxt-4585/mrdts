@@ -21,8 +21,6 @@ class EntityRef:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "kind", EntityKind(self.kind))
-        if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
-            raise ValueError("实体索引必须为非负整数")
 
 
 @dataclass(frozen=True)
@@ -31,10 +29,6 @@ class DirectedChannelKey:
 
     source: EntityRef
     target: EntityRef
-
-    def __post_init__(self) -> None:
-        if self.source == self.target:
-            raise ValueError("有向信道的收发端不能是同一实体")
 
 
 @dataclass(frozen=True, order=True)

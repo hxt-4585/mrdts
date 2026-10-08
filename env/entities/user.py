@@ -18,26 +18,12 @@ class User:
     @property
     def num_users(self):
         """返回全部区域中的用户总数。"""
-        if self.region_user_counts is None:
-            raise RuntimeError("用户尚未生成，请先调用 generate_from_region()")
         return int(self.region_user_counts.sum())
 
     def _allocate_region_user_counts(self, region_areas, rng):
         """按区域面积及配置浮动分配用户数量。"""
         cfg = self.config
         region_count = len(region_areas)
-        if not isinstance(cfg.total_users, int) or cfg.total_users < 0:
-            raise ValueError("total_users 必须是非负整数")
-        if not isinstance(cfg.min_users_per_region, int) or cfg.min_users_per_region < 0:
-            raise ValueError("min_users_per_region 必须是非负整数")
-        if not 0.0 <= cfg.area_fluctuation <= 1.0:
-            raise ValueError("area_fluctuation 应在 [0, 1] 区间内")
-        if not 0.0 <= cfg.center_bias <= 1.0:
-            raise ValueError("center_bias 应在 [0, 1] 区间内")
-        if cfg.center_spread_ratio <= 0.0:
-            raise ValueError("center_spread_ratio 必须大于 0")
-        if cfg.total_users < region_count * cfg.min_users_per_region:
-            raise ValueError("total_users 不足以满足每个区域的最小用户数")
 
         weights = region_areas.astype(float) / region_areas.sum()
         if cfg.area_fluctuation > 0.0:
@@ -76,8 +62,6 @@ class User:
 
     def generate_from_region(self, region):
         """根据已生成的区域地图创建用户坐标、区域编号与区域用户数。"""
-        if region.region_map is None:
-            raise RuntimeError("区域地图尚未生成，请先调用 Region.generate()")
 
         region_map = region.region_map
         region_count = region.config.region_count
