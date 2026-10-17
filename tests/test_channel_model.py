@@ -10,14 +10,14 @@ from env.settings import ChannelConfig
 
 
 class TestChannelModel(unittest.TestCase):
-    """地空、空空与空地链路应共享同一套传播计算。"""
+    """验证各类链路的传播计算与速率。"""
 
     def setUp(self):
         self.config = ChannelConfig.default()
         self.model = ChannelModel(self.config)
 
     def test_uses_configured_bandwidth_for_each_link_type(self):
-        """三类链路的速率仅应由对应配置带宽区分。"""
+        """三类链路使用各自带宽，空空链路使用确定 LoS 增益。"""
         transmitter = np.array([0.0, 0.0, 0.0])
         receiver = np.array([100.0, 0.0, 50.0])
 
@@ -25,16 +25,16 @@ class TestChannelModel(unittest.TestCase):
             transmitter, receiver, 1.0, LinkType.GROUND_TO_AIR
         )
         air_to_air = self.model.calculate_link(
-            transmitter, receiver, 1.0, LinkType.AIR_TO_AIR
+            receiver, (200.0, 0.0, 100.0), 1.0, LinkType.AIR_TO_AIR
         )
         air_to_ground = self.model.calculate_link(
-            transmitter, receiver, 1.0, LinkType.AIR_TO_GROUND
+            receiver, transmitter, 1.0, LinkType.AIR_TO_GROUND
         )
 
         self.assertEqual(ground_to_air.bandwidth_hz, 4e6)
         self.assertEqual(air_to_air.bandwidth_hz, 6e6)
         self.assertEqual(air_to_ground.bandwidth_hz, 4e6)
-        self.assertAlmostEqual(air_to_air.rate_bps, ground_to_air.rate_bps * 1.5)
+        self.assertGreater(air_to_air.rate_bps, ground_to_air.rate_bps * 1.5)
         self.assertAlmostEqual(air_to_ground.rate_bps, ground_to_air.rate_bps)
 
     def test_calculates_expected_los_weighted_channel_gain(self):
@@ -62,6 +62,18 @@ class TestChannelModel(unittest.TestCase):
         self.assertAlmostEqual(metrics.elevation_angle_deg, elevation)
         self.assertAlmostEqual(metrics.los_probability, los_probability)
         self.assertAlmostEqual(metrics.average_channel_gain, expected_gain)
+
+    def test_air_to_air_is_always_los_at_equal_altitude(self):
+        """同高度空空链路仍为确定 LoS，不按零仰角概率衰减。"""
+        metrics = self.model.calculate_link(
+            (0.0, 0.0, 50.0), (100.0, 0.0, 50.0), 1.0, LinkType.AIR_TO_AIR
+        )
+
+        self.assertEqual(metrics.los_probability, 1.0)
+        self.assertAlmostEqual(
+            metrics.average_channel_gain,
+            self.config.reference_channel_gain / 100.0**2,
+        )
 
     def test_calculates_transmission_delay_and_transmit_energy(self):
         """传输时延与发送能耗应由同一链路速率推导。"""

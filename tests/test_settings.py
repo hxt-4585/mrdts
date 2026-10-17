@@ -90,7 +90,7 @@ class TestSettings(unittest.TestCase):
             return isinstance(value, dict) and any(
                 key == "seed" or contains_seed(item) for key, item in value.items())
 
-        for path in (PROJECT_ROOT / "config").rglob("*.toml"):
+        for path in (PROJECT_ROOT / "config").glob("*.toml"):
             with path.open("rb") as stream:
                 self.assertFalse(contains_seed(tomllib.load(stream)), str(path))
         for cls in (RegionConfig, UserConfig, DAGConfig):

@@ -53,7 +53,10 @@ class ChannelModel:
         elevation_angle_deg = math.degrees(
             math.atan2(height_difference_m, horizontal_distance_m)
         )
-        los_probability = self._los_probability(elevation_angle_deg)
+        los_probability = (
+            1.0 if link_type is LinkType.AIR_TO_AIR
+            else self._los_probability(elevation_angle_deg)
+        )
         los_gain = self.config.reference_channel_gain / distance_m**2
         nlos_gain = self.config.nlos_attenuation_factor * los_gain
         average_channel_gain = los_probability * los_gain + (1.0 - los_probability) * nlos_gain
