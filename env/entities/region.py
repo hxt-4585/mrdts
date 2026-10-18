@@ -24,6 +24,24 @@ class Region:
         self.rng = rng
         # 区域地图：shape=(grid_size, grid_size)，取值 1..R，0 表示未分配
         self.region_map = None
+        # 区域编号 -> 与其共享网格边的区域编号（升序）。
+        self.adjacent_region_ids = None
+
+    def _update_adjacent_region_ids(self):
+        """根据区域地图中共享边的网格建立双向区域邻接表。"""
+        adjacent = {region_id: set() for region_id in range(1, self.config.region_count + 1)}
+        region_map = self.region_map
+        for first, second in (
+            (region_map[:, :-1], region_map[:, 1:]),
+            (region_map[:-1, :], region_map[1:, :]),
+        ):
+            for left, right in zip(first.flat, second.flat):
+                if left != right:
+                    adjacent[int(left)].add(int(right))
+                    adjacent[int(right)].add(int(left))
+        self.adjacent_region_ids = {
+            region_id: tuple(sorted(neighbors)) for region_id, neighbors in adjacent.items()
+        }
 
     # ------------------------------ 种子选取 ------------------------------ #
     def _select_seeds(self, rng):
@@ -146,6 +164,7 @@ class Region:
         labels, _ = self._assign_power_cells(seeds, targets, coordinates)
 
         self.region_map = labels.reshape(grid_size, grid_size) + 1
+        self._update_adjacent_region_ids()
         return self.region_map
 
     # ------------------------------ 区域归属查询 ------------------------------ #
@@ -179,4 +198,5 @@ class Region:
         """从 .npy 文件加载区域地图。"""
         region_map = np.load(path)
         self.region_map = region_map
+        self._update_adjacent_region_ids()
         return self.region_map

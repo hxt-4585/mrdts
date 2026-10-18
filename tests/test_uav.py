@@ -73,6 +73,16 @@ class TestMasterUAV(unittest.TestCase):
         for position, region_id in zip(masters.positions, masters.region_ids):
             self.assertEqual(region.get_region_id(position[0], position[1]), region_id)
 
+    def test_uses_region_adjacency_as_initial_master_neighbors(self):
+        region = Region(rng=RandomStreams().region)
+        region.generate()
+        masters = MasterUAV()
+
+        masters.generate_from_region(region)
+
+        self.assertEqual(masters.neighbor_region_ids, region.adjacent_region_ids)
+        self.assertIsNot(masters.neighbor_region_ids, region.adjacent_region_ids)
+
 
 class TestMemberUAV(unittest.TestCase):
     @staticmethod

@@ -6,6 +6,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
 
@@ -107,6 +108,24 @@ class TestRegionGeneration(unittest.TestCase):
                 x = (i + 0.5) * cell
                 y = (j + 0.5) * cell
                 self.assertEqual(mgr.get_region_id(x, y), int(region_map[j, i]))
+
+    def test_adjacent_region_ids_include_shared_edges_but_not_corners(self):
+        mgr = self._make_manager(region_count=4)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "region.npy")
+            np.save(path, np.array([[1, 2], [3, 4]], dtype=np.int32))
+            mgr.load(path)
+
+        self.assertEqual(
+            mgr.adjacent_region_ids,
+            {1: (2, 3), 2: (1, 4), 3: (1, 4), 4: (2, 3)},
+        )
+
+    def test_generated_regions_have_adjacency(self):
+        mgr = self._make_manager(region_count=2)
+        mgr.generate()
+
+        self.assertEqual(mgr.adjacent_region_ids, {1: (2,), 2: (1,)})
 
     def test_region_num_adjustable(self):
         """区域数量可通过参数调节。"""

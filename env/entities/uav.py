@@ -35,6 +35,7 @@ class MasterUAV(UAV):
 
     def __init__(self, config=None):
         self.config = config if config is not None else UAVConfig.default()
+        self.neighbor_region_ids = None
         super().__init__()
 
     def generate_from_region(self, region):
@@ -53,6 +54,7 @@ class MasterUAV(UAV):
 
         region_ids = np.arange(1, self.config.master_uav_count + 1, dtype=np.int32)
         super().__init__(positions, region_ids)
+        self.neighbor_region_ids = dict(region.adjacent_region_ids)
         return self.positions
 
 
