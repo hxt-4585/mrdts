@@ -9,7 +9,7 @@ from scripts.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV, UAV
 from env.entities.user import User
-from env.settings import UAVConfig, UserConfig
+from env.settings import EnvConfig, UAVConfig, UserConfig
 
 
 class TestUAV(unittest.TestCase):
@@ -86,16 +86,31 @@ class TestMasterUAV(unittest.TestCase):
 
 class TestMemberUAV(unittest.TestCase):
     @staticmethod
-    def _generate_members(config=None):
+    def _generate_members(config=None, env_config=None):
         region = Region(rng=RandomStreams().region)
         region.generate()
         users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)
-        members = MemberUAV(config=config)
+        members = MemberUAV(config=config, env_config=env_config)
         members.generate_from_region_and_user(region, users, masters)
         return members
+
+    def test_distributes_members_evenly_independent_of_user_counts(self):
+        region = Region(rng=RandomStreams().region)
+        region.generate()
+        users = User(rng=RandomStreams().user)
+        users.generate_from_region(region)
+        users.region_ids[:] = 1
+        config = replace(UAVConfig.default(), member_uav_count=13)
+        masters = MasterUAV(config)
+        masters.generate_from_region(region)
+        members = MemberUAV(config)
+
+        members.generate_from_region_and_user(region, users, masters)
+
+        np.testing.assert_array_equal(members.region_member_counts, [4, 3, 3, 3])
 
     def test_generates_separated_members_near_masters_in_their_regions(self):
         """Member 应位于本区域 Master 附近，且水平间距至少一格。"""
@@ -160,6 +175,12 @@ class TestMemberUAV(unittest.TestCase):
             members.core_frequencies[members.bs_index], np.full(4, 12e9)
         )
 
+    def test_energy_virtual_queue_includes_bs_at_shared_index(self):
+        members = self._generate_members()
+
+        self.assertEqual(len(members.energy_virtual_queue_j), members.num_uavs)
+        self.assertEqual(members.energy_virtual_queue_j[members.bs_index], 0.0)
+
     def test_initial_positions_do_not_depend_on_user_coordinates(self):
         """用户坐标改变但区域人数不变时，Member 初始位置应完全一致。"""
         region = Region(rng=RandomStreams().region)
@@ -198,7 +219,7 @@ class TestMemberUAV(unittest.TestCase):
                              area_fluctuation=0.), rng=RandomStreams().user)
         users.generate_from_region(region)
         config = replace(UAVConfig.default(), master_uav_count=count,
-                         member_uav_count=3 * count, min_members_per_region=3)
+                         member_uav_count=3 * count)
         masters = MasterUAV(config)
         masters.generate_from_region(region)
         members = MemberUAV(config)
@@ -244,7 +265,7 @@ class TestMemberUAV(unittest.TestCase):
         )
 
         self.assertEqual(members.config.member_slot_energy, 145.0)
-        self.assertEqual(members.config.flight_duration, 0.5)
+        self.assertEqual(members.env_config.flight_duration_s, 0.5)
         self.assertEqual(members.config.max_horizontal_speed, 10.0)
         self.assertFalse(violations.any())
         np.testing.assert_allclose(
@@ -252,6 +273,18 @@ class TestMemberUAV(unittest.TestCase):
             original_positions[: members.bs_index, :2] + np.array([2.0, -1.0]),
         )
         np.testing.assert_array_equal(members.positions[:, 2], original_positions[:, 2])
+
+    def test_uses_env_config_flight_duration(self):
+        members = self._generate_members(
+            env_config=replace(EnvConfig.default(), flight_duration_s=1.0)
+        )
+        initial = members.positions.copy()
+        actions = np.zeros((members.member_uav_count, 2), dtype=np.float32)
+        actions[0, 0] = 0.4
+
+        members.apply_flight_actions(actions, Region(rng=RandomStreams().region).config.side_length)
+
+        np.testing.assert_allclose(members.positions[0, :2], initial[0, :2] + [4.0, 0.0])
 
     def test_flight_actions_leave_bs_position_unchanged(self):
         """Member 飞行仅改变 Member 行，不得移动最后一行的 BS。"""

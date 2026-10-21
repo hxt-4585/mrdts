@@ -24,10 +24,8 @@ class UAVConfig:
     master_uav_count: int
     master_altitude: float
     member_uav_count: int
-    min_members_per_region: int
     member_altitude: float
     member_slot_energy: float
-    flight_duration: float
     max_horizontal_speed: float
     member_core_count: int
     member_core_frequency: float
@@ -56,10 +54,8 @@ class UAVConfig:
             master_uav_count=master["uav_count"],
             master_altitude=master["altitude"],
             member_uav_count=member["uav_count"],
-            min_members_per_region=member["min_uavs_per_region"],
             member_altitude=member["altitude"],
             member_slot_energy=member["slot_energy"],
-            flight_duration=member["flight_duration"],
             max_horizontal_speed=member["max_horizontal_speed"],
             member_core_count=member["core_count"],
             member_core_frequency=member["core_frequency"],

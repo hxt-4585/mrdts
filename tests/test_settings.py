@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 
 from scripts.randomness import RandomStreams
-from env.settings import ChannelConfig, DAGConfig, RegionConfig, UAVConfig, UserConfig
+from env.settings import ChannelConfig, DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
 from env.workload.dag_generator import DAGGenerator
 
 
@@ -31,6 +31,15 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(RegionConfig.default().grid_size, 100)
         self.assertEqual(DAGConfig.default().n, 10)
         self.assertEqual(UserConfig.default().total_users, 100)
+
+    def test_env_config_loads_slot_durations_epoch_steps_and_seed(self):
+        config = EnvConfig.from_toml(PROJECT_ROOT / "config" / "env.toml")
+
+        self.assertEqual(config.flight_duration_s, 0.5)
+        self.assertEqual(config.scheduling_duration_s, 1.0)
+        self.assertEqual(config.steps_per_epoch, 500)
+        self.assertEqual(config.env_seed, 42)
+        self.assertEqual(EnvConfig.default(), config)
 
     def test_user_config_loads_population_parameters(self):
         config = UserConfig.from_toml(PROJECT_ROOT / "config" / "user.toml")
@@ -83,14 +92,16 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(member["coverage_radius"], 180.0)
         self.assertEqual(member["transmit_power"], 1.0)
 
-    def test_environment_configs_do_not_define_seed(self):
+    def test_entity_and_workload_configs_do_not_define_seed(self):
         from dataclasses import fields
 
         def contains_seed(value):
             return isinstance(value, dict) and any(
-                key == "seed" or contains_seed(item) for key, item in value.items())
+                key in {"seed", "env_seed"} or contains_seed(item) for key, item in value.items())
 
         for path in (PROJECT_ROOT / "config").glob("*.toml"):
+            if path.name == "env.toml":
+                continue
             with path.open("rb") as stream:
                 self.assertFalse(contains_seed(tomllib.load(stream)), str(path))
         for cls in (RegionConfig, UserConfig, DAGConfig):

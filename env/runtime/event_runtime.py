@@ -12,6 +12,7 @@ import numpy as np
 from env.communication.channel_model import ChannelModel, LinkType
 from env.communication.routing import RoutePlanner
 from env.contracts import DAGRequest, PlacementDecision
+from env.settings import EnvConfig
 from env.runtime.channel_queue import DirectedChannelState, TransferJob
 from env.runtime.dag_runtime import DAGRuntime
 from env.runtime.server_queue import ServerState
@@ -61,10 +62,10 @@ class SchedulingRuntime:
         ground_owner_members: Mapping[EntityRef, EntityRef] | None = None,
         *,
         slot_start: float = 0.0,
-        max_duration_s: float = 1.0,
+        max_duration_s: float | None = None,
     ):
         self._slot_start = float(slot_start)
-        duration = float(max_duration_s)
+        duration = float(max_duration_s if max_duration_s is not None else EnvConfig.default().scheduling_duration_s)
         self._deadline = self._slot_start + duration
         self._closed = False
         self._result: SlotResult | None = None

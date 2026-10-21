@@ -5,7 +5,7 @@ import numpy as np
 from env.communication.channel_model import ChannelModel
 from env.entities.uav import MemberUAV
 from env.runtime.slot_result import SlotResult
-from env.settings import SchedulingConfig
+from env.settings import EnvConfig
 
 
 class Simulator:
@@ -21,14 +21,14 @@ class Simulator:
         channel_model: ChannelModel,
         user_transmit_power: float,
         user_core_frequency: float = 1e9,
-        scheduling_config: SchedulingConfig | None = None,
+        env_config: EnvConfig | None = None,
     ):
         self.members = members
         self.channel_model = channel_model
         self.user_transmit_power = user_transmit_power
         self.user_core_frequency = float(user_core_frequency)
         self.user_member_ids = None
-        self.scheduling_config = scheduling_config if scheduling_config is not None else SchedulingConfig.default()
+        self.env_config = env_config if env_config is not None else members.env_config
         self._runtime = None
         self._next_slot_start = 0.0
 
@@ -136,7 +136,7 @@ class Simulator:
             member_regions=member_regions,
             ground_owner_members=ground_owner_members,
             slot_start=slot_start,
-            max_duration_s=self.scheduling_config.max_duration_s,
+            max_duration_s=self.env_config.scheduling_duration_s,
         )
 
     def refresh_slot_topology(self, region, user_positions):

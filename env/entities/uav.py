@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from env.settings import UAVConfig
+from env.settings import EnvConfig, UAVConfig
 
 
 class UAV:
@@ -61,11 +61,14 @@ class MasterUAV(UAV):
 class MemberUAV(UAV):
     """可在区域间迁移的 Member UAV 集合。"""
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, env_config=None):
         self.config = config if config is not None else UAVConfig.default()
+        self.env_config = env_config if env_config is not None else EnvConfig.default()
         self.region_member_counts = None
         self.core_counts = None
         self.core_frequencies = None
+        # 每个计算节点当前时隙的能量虚拟队列 Q_i(t)，最后一行对应固定 BS。
+        self.energy_virtual_queue_j = None
         super().__init__()
 
     @property
@@ -91,22 +94,11 @@ class MemberUAV(UAV):
             self.config.bs_core_frequency
         )
 
-    def _allocate_region_member_counts(self, region_user_counts):
-        """按区域用户数分配 Member，并保证区域最低配额。"""
-        region_count = len(region_user_counts)
-        minimum = region_count * self.config.min_members_per_region
-
-        remaining = self.config.member_uav_count - minimum
-        weights = region_user_counts.astype(float)
-        if weights.sum() == 0:
-            weights.fill(1.0 / region_count)
-        else:
-            weights /= weights.sum()
-        quotas = remaining * weights
-        counts = np.floor(quotas).astype(np.int32) + self.config.min_members_per_region
-        remainder = self.config.member_uav_count - int(counts.sum())
-        for index in np.argsort(-(quotas - np.floor(quotas)))[:remainder]:
-            counts[index] += 1
+    def _allocate_region_member_counts(self, region_count):
+        """按区域平均分配 Member，余数依次分配给前面的区域。"""
+        count, remainder = divmod(self.member_uav_count, region_count)
+        counts = np.full(region_count, count, dtype=np.int32)
+        counts[:remainder] += 1
         return counts
 
     def apply_flight_actions(self, normalized_actions, side_length):
@@ -126,7 +118,7 @@ class MemberUAV(UAV):
 
         velocities = normalized_actions * self.config.max_horizontal_speed
         member_positions = self.positions[: self.bs_index, :2]
-        candidate_positions = member_positions + velocities * self.config.flight_duration
+        candidate_positions = member_positions + velocities * self.env_config.flight_duration_s
         in_bounds = (
             (candidate_positions >= 0.0) & (candidate_positions <= side_length)
         ).all(axis=1)
@@ -148,11 +140,10 @@ class MemberUAV(UAV):
         return positions[ordered[:count]]
 
     def generate_from_region_and_user(self, region, users, masters):
-        """按区域用户数分配数量，位置只由本区域网格和 Master 决定。"""
+        """按区域平均分配数量，位置只由本区域网格和 Master 决定。"""
 
         region_count = region.config.region_count
-        user_counts = np.bincount(users.region_ids, minlength=region_count + 1)[1:]
-        member_counts = self._allocate_region_member_counts(user_counts)
+        member_counts = self._allocate_region_member_counts(region_count)
         positions = np.empty((self.member_uav_count + 1, 3), dtype=np.float32)
         region_ids = np.empty(self.member_uav_count + 1, dtype=np.int32)
 
@@ -176,4 +167,5 @@ class MemberUAV(UAV):
         self.region_member_counts = member_counts
         super().__init__(positions, region_ids)
         self._initialize_compute_resources()
+        self.energy_virtual_queue_j = np.zeros(self.num_uavs, dtype=float)
         return self.positions

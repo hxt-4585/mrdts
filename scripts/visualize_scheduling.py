@@ -45,7 +45,7 @@ def make_scene():
                          area_fluctuation=0.0), rng=RandomStreams().user)
     users.generate_from_region(region)
     config = replace(UAVConfig.default(), master_uav_count=count,
-                     member_uav_count=2 * count, min_members_per_region=2)
+                     member_uav_count=2 * count)
     masters = MasterUAV(config)
     masters.generate_from_region(region)
     members = MemberUAV(config)
@@ -183,7 +183,7 @@ def build_replay(load_scale=1.0, initial_region=1):
     events.sort(key=lambda e: (e["at"], priority.get(e["kind"], 8), e["region"], e["text"]))
     return dict(meta=dict(slot_start=result.slot_start, deadline=result.slot_end,
                           initial_region=initial_region, region_count=region.config.region_count,
-                          load_scale=load_scale, flight_duration=members.config.flight_duration,
+                          load_scale=load_scale, flight_duration=members.env_config.flight_duration_s,
                           flight_violations=violations.tolist()),
                 map=dict(side=region.config.side_length, cells=region.region_map.tolist()),
                 entities=entities, dags=dag_definitions, tasks=tasks, transfers=transfers, events=events,

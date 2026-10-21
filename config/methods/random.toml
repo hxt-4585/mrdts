@@ -2,7 +2,6 @@
 [run]
 seed = 42
 episodes = 2
-slots = 200
 output_root = "results"
 # 用户数和每个 DAG 的节点数默认读取 config/user.toml、config/dag.toml。
 # 如需覆盖，取消下面的注释；也可使用 --users 和 --dag-nodes。

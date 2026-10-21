@@ -24,7 +24,7 @@ from env.contracts import DAGRequest, PlacementDecision
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV
 from env.entities.user import User
-from env.settings import ChannelConfig, DAGConfig, RegionConfig, SchedulingConfig, UAVConfig, UserConfig
+from env.settings import ChannelConfig, DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
 from env.simulator import Simulator
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAGGenerator
@@ -48,7 +48,7 @@ class RandomStreams:
 def resolved_settings(users=None, dag_nodes=None):
     settings = dict(region=RegionConfig.default(), user=UserConfig.default(),
                     uav=UAVConfig.default(), channel=ChannelConfig.default(),
-                    dag=DAGConfig.default(), scheduling=SchedulingConfig.default())
+                    dag=DAGConfig.default(), env=EnvConfig.default())
     if users is not None:
         settings['user'] = replace(settings['user'], total_users=users)
     if dag_nodes is not None:
@@ -63,10 +63,10 @@ def build_scene(settings, streams):
     users.generate_from_region(region)
     masters = MasterUAV(settings['uav'])
     masters.generate_from_region(region)
-    members = MemberUAV(settings['uav'])
+    members = MemberUAV(settings['uav'], settings['env'])
     members.generate_from_region_and_user(region, users, masters)
     simulator = Simulator(members, ChannelModel(settings['channel']), users.config.transmit_power,
-                          users.config.core_frequency, settings['scheduling'])
+                          users.config.core_frequency, settings['env'])
     generator = DAGGenerator(settings['dag'], rng=streams.dag, py_rng=streams.dag_python)
     return region, users, simulator, generator
 
@@ -138,8 +138,9 @@ def git_output(*args):
         return None
 
 
-def evaluate(*, seed=42, episodes=2, slots=200, users=None, dag_nodes=None, output_root='results'):
+def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='results'):
     settings = resolved_settings(users, dag_nodes)
+    steps_per_epoch = settings['env'].steps_per_epoch
     output_root = Path(output_root)
     if not output_root.is_absolute():
         output_root = PROJECT_ROOT / output_root
@@ -147,7 +148,7 @@ def evaluate(*, seed=42, episodes=2, slots=200, users=None, dag_nodes=None, outp
     output = output_root / 'random' / f'seed_{seed}' / stamp
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / 'config.json', dict(
-        method='random', ordering='ers', seed=seed, episodes=episodes, slots=slots,
+        method='random', ordering='ers', seed=seed, episodes=episodes,
         environment={name: asdict(value) for name, value in settings.items()},
         delay_definition='completion_time - slot_start; unfinished DAGs capped at scheduling window',
     ))
@@ -170,7 +171,7 @@ def evaluate(*, seed=42, episodes=2, slots=200, users=None, dag_nodes=None, outp
                 streams = RandomStreams(seed, episode)
                 # 同一空间随机流重建场景：区域、用户固定，UAV 回到初始位置。
                 scene = build_scene(settings, streams)
-                for slot in range(slots):
+                for slot in range(steps_per_epoch):
                     result, violations = run_slot(scene, streams, slot)
                     row = slot_metrics(result, episode, slot, violations)
                     rows.append(row)
@@ -204,7 +205,7 @@ def evaluate(*, seed=42, episodes=2, slots=200, users=None, dag_nodes=None, outp
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=PROJECT_ROOT / 'config' / 'methods' / 'random.toml')
-    for name in ('seed', 'episodes', 'slots', 'users', 'dag-nodes'):
+    for name in ('seed', 'episodes', 'users', 'dag-nodes'):
         parser.add_argument(f'--{name}', type=int)
     parser.add_argument('--output-root', type=Path)
     args = parser.parse_args()

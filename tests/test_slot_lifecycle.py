@@ -1,6 +1,7 @@
 """真实环境时隙开始、截止结算和旧运行时隔离。"""
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 import numpy as np
@@ -58,7 +59,7 @@ class TestSlotLifecycle(unittest.TestCase):
             (column + 1) * cell_size - 1.0, (row + 0.5) * cell_size
         )
         self.actions[member_id, 0] = 2.0 / (
-            self.members.config.max_horizontal_speed * self.members.config.flight_duration
+            self.members.config.max_horizontal_speed * self.members.env_config.flight_duration_s
         )
         return member_id, source, target
 
@@ -197,11 +198,11 @@ class TestSlotLifecycle(unittest.TestCase):
         np.testing.assert_array_equal(runtime.entity_positions[self.ground], snapshot)
 
     def test_duration_configuration_controls_consecutive_windows(self):
-        from env.settings import SchedulingConfig
+        from env.settings import EnvConfig
 
-        self.assertEqual(SchedulingConfig.default().max_duration_s, 1.0)
+        self.assertEqual(EnvConfig.default().scheduling_duration_s, 1.0)
         self.environment = Simulator(self.members, ChannelModel(), 0.1,
-                                       scheduling_config=SchedulingConfig(0.25))
+                                       env_config=replace(EnvConfig.default(), scheduling_duration_s=0.25))
         self.assertEqual(self._begin().deadline, 0.25)
         first = self.environment.end_slot()
         self.assertEqual(first.slot_start, 0.0)

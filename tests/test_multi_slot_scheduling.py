@@ -38,7 +38,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             user_transmit_power=self.users.config.transmit_power,
             user_core_frequency=self.users.config.core_frequency,
         )
-        self.max_duration_s = self.environment.scheduling_config.max_duration_s
+        self.max_duration_s = self.environment.env_config.scheduling_duration_s
         self.rng = RandomStreams().scheduling
 
     def test_random_flight_and_random_placement_finish_two_dags_per_slot_before_deadline(self):
