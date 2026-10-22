@@ -29,7 +29,8 @@ class TestSchedulingReplay(unittest.TestCase):
             local = next(t for t in tasks if t["node"] == 1)
             self.assertIn("input_kbit", local)
             self.assertNotIn("input_kb", local)
-            self.assertEqual(local["input_arrival"], 0.0)
+            self.assertEqual(local["input_arrival"], local["decision_at"])
+            self.assertGreater(local["decision_at"], 0.0)
             self.assertEqual(local["compute_energy_j"], 0.0)
             self.assertAlmostEqual(local["finish"] - local["start"], local["cycles"] / 1e9)
             self.assertFalse(any(x["task"] == local["id"] and x["kind"] == "input"
@@ -72,7 +73,7 @@ class TestSchedulingReplay(unittest.TestCase):
             self.assertAlmostEqual(task["rank_s"], task["average_compute_s"] + tail)
 
     def test_overload_does_not_report_planned_completion_as_actual_completion(self):
-        data = self.build(load_scale=100.0)
+        data = self.build(load_scale=10000.0)
         deadline = data["meta"]["deadline"]
         self.assertGreater(data["summary"]["failed_dags"], 0)
         truncated = [x for x in data["transfers"] if x["start"] is not None and not x["completed"]]
@@ -83,6 +84,9 @@ class TestSchedulingReplay(unittest.TestCase):
             self.assertFalse(any(e["kind"] == "transfer_finish" and e.get("transfer") == x["id"]
                                  for e in data["events"]))
         self.assertTrue(all(e["at"] <= deadline for e in data["events"]))
+        unscheduled = [t for t in data['tasks'] if t['decision_at'] is None]
+        self.assertTrue(unscheduled)
+        self.assertTrue(all(t['execution'] is None for t in unscheduled))
         self.assertTrue(any(t["failed_at"] == deadline for t in data["tasks"]))
         self.assertAlmostEqual(sum(x["energy_j"] for x in data["transfers"]),
                                data["summary"]["tx_energy_j"])

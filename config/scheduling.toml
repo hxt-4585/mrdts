@@ -1,4 +1,0 @@
-[scheduling]
-# 单个时隙内 DAG 传输与执行的最长允许调度时长（s）。
-# Environment 在 slot_start + max_duration_s 截止结算；未完成 DAG 失败，运行时关闭。
-max_duration_s = 1.0

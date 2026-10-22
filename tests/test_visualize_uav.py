@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV
 from env.entities.user import User
@@ -21,9 +21,9 @@ from scripts.visualize_uav import draw_uav_distribution
 class TestUAVDistributionDrawing(unittest.TestCase):
     def test_draw_uav_distribution_plots_users_masters_members_and_bs(self):
         """同一张图应分别包含全部用户、Master、Member 与 BS。"""
-        region = Region(rng=RandomStreams.from_config().region)
+        region = Region(rng=RandomStreams().region)
         region.generate()
-        users = User(rng=RandomStreams.from_config().user)
+        users = User(rng=RandomStreams().user)
         users.generate_from_region(region)
         masters = MasterUAV()
         masters.generate_from_region(region)

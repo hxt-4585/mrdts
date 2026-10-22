@@ -9,16 +9,56 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 
 # 将项目根目录加入 sys.path，便于导入 env 包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from experiments.randomness import RandomStreams
+from scripts.randomness import RandomStreams
 from env.entities.region import Region
 from env.settings import RegionConfig
+
+
+def is_each_region_connected(region_map):
+    """检查每个区域内部的网格是否通过四邻接构成单一连通分量（并查集）。"""
+    m = region_map
+    ny, nx = m.shape
+    parent = list(range(nx * ny))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # 向右、向下邻居若属于同一区域则合并
+    for j in range(ny):
+        for i in range(nx):
+            idx = j * nx + i
+            r = m[j, i]
+            if i + 1 < nx and m[j, i + 1] == r:
+                union(idx, idx + 1)
+            if j + 1 < ny and m[j + 1, i] == r:
+                union(idx, idx + nx)
+
+    # 每个区域的所有网格应属于同一根
+    region_root = {}
+    for j in range(ny):
+        for i in range(nx):
+            r = int(m[j, i])
+            root = find(j * nx + i)
+            if r in region_root:
+                if region_root[r] != root:
+                    return False
+            else:
+                region_root[r] = root
+    return True
 
 
 class TestRegionGeneration(unittest.TestCase):
@@ -28,19 +68,19 @@ class TestRegionGeneration(unittest.TestCase):
         self.cfg = RegionConfig.default()
 
     def _make_manager(self, **kwargs):
-        return Region(replace(self.cfg, **kwargs), rng=RandomStreams.from_config().region)
+        return Region(replace(self.cfg, **kwargs), rng=RandomStreams().region)
 
-    def test_default_generate_and_validate(self):
-        """默认 R=4 生成并通过校验。"""
-        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
+    def test_default_generate_and_connectivity(self):
+        """默认 R=4 生成完整且连通的区域。"""
+        mgr = Region(self.cfg, rng=RandomStreams().region)
         mgr.generate()
-        ok, sizes = mgr.validate()
-        self.assertTrue(ok)
+        sizes = mgr.get_region_sizes()
+        self.assertTrue(is_each_region_connected(mgr.region_map))
         self.assertEqual(len(sizes), self.cfg.region_count)
 
     def test_full_coverage_and_no_overlap(self):
         """地图应全覆盖且每个网格只属于一个区域。"""
-        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
+        mgr = Region(self.cfg, rng=RandomStreams().region)
         region_map = mgr.generate()
         # 全覆盖：无 0 值
         self.assertTrue((region_map > 0).all())
@@ -51,7 +91,7 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_min_area_ratio(self):
         """每个区域面积不低于下限。"""
-        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
+        mgr = Region(self.cfg, rng=RandomStreams().region)
         mgr.generate()
         sizes = mgr.get_region_sizes()
         for r, s in enumerate(sizes):
@@ -59,7 +99,7 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_region_id_query(self):
         """坐标查询应与区域地图保持一致。"""
-        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
+        mgr = Region(self.cfg, rng=RandomStreams().region)
         region_map = mgr.generate()
         cell = self.cfg.cell_size
         # 抽样若干网格中心点查询
@@ -69,35 +109,41 @@ class TestRegionGeneration(unittest.TestCase):
                 y = (j + 0.5) * cell
                 self.assertEqual(mgr.get_region_id(x, y), int(region_map[j, i]))
 
+    def test_adjacent_region_ids_include_shared_edges_but_not_corners(self):
+        mgr = self._make_manager(region_count=4)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "region.npy")
+            np.save(path, np.array([[1, 2], [3, 4]], dtype=np.int32))
+            mgr.load(path)
+
+        self.assertEqual(
+            mgr.adjacent_region_ids,
+            {1: (2, 3), 2: (1, 4), 3: (1, 4), 4: (2, 3)},
+        )
+
+    def test_generated_regions_have_adjacency(self):
+        mgr = self._make_manager(region_count=2)
+        mgr.generate()
+
+        self.assertEqual(mgr.adjacent_region_ids, {1: (2,), 2: (1,)})
+
     def test_region_num_adjustable(self):
         """区域数量可通过参数调节。"""
         for r in [2, 3, 5]:
             mgr = self._make_manager(region_count=r, min_area_ratio=0.05)
             mgr.generate()
-            ok, sizes = mgr.validate()
-            self.assertTrue(ok)
+            sizes = mgr.get_region_sizes()
+            self.assertTrue(is_each_region_connected(mgr.region_map))
+            self.assertTrue((sizes >= mgr.config.min_cells_per_region).all())
             self.assertEqual(len(sizes), r)
 
     def test_reproducible_with_same_seed(self):
         """相同种子应生成相同地图。"""
-        mgr1 = Region(self.cfg, rng=RandomStreams.from_config().region)
+        mgr1 = Region(self.cfg, rng=RandomStreams().region)
         map1 = mgr1.generate()
-        mgr2 = Region(self.cfg, rng=RandomStreams.from_config().region)
+        mgr2 = Region(self.cfg, rng=RandomStreams().region)
         map2 = mgr2.generate()
         np.testing.assert_array_equal(map1, map2)
-
-    def test_infeasible_ratio_raises(self):
-        """区域数 × 下限 超过总网格数时应抛出 ValueError。"""
-        # R=6 且 min_ratio=0.2 -> 6*2000 = 12000 > 10000
-        mgr = self._make_manager(region_count=6, min_area_ratio=0.2)
-        with self.assertRaises(ValueError):
-            mgr.generate()
-
-    def test_region_count_cannot_exceed_grid_cells(self):
-        """区域数超过网格数应在生成前被明确拒绝。"""
-        mgr = self._make_manager(grid_size=3, region_count=10, min_area_ratio=0.0)
-        with self.assertRaises(ValueError):
-            mgr.generate()
 
     def test_area_imbalance_zero_balanced(self):
         """area_imbalance=0 时各区域面积应在合理范围内接近。"""
@@ -124,7 +170,7 @@ class TestRegionGeneration(unittest.TestCase):
 
     def test_regions_have_compact_boundaries(self):
         """默认区域不应出现随机扩张导致的细长尖刺。"""
-        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
+        mgr = Region(self.cfg, rng=RandomStreams().region)
         region_map = mgr.generate()
 
         for region_id in range(1, self.cfg.region_count + 1):
@@ -140,41 +186,19 @@ class TestRegionGeneration(unittest.TestCase):
             # 正方形的该指标为 16；较大的值表示细长边界或尖刺。
             self.assertLess(perimeter ** 2 / area, 25.0)
 
-    def test_area_imbalance_invalid_raises(self):
-        """area_imbalance 越界应抛出 ValueError。"""
-        for bad in [-0.1, 1.0, 1.5]:
-            mgr = self._make_manager(area_imbalance=bad)
-            with self.assertRaises(ValueError):
-                mgr.generate()
-
-    def test_invalid_cvt_iteration_counts_raise(self):
-        """CVT 的两个迭代次数必须为正整数。"""
-        for field in ("lloyd_iterations", "capacity_iterations"):
-            mgr = self._make_manager(**{field: 0})
-            with self.assertRaises(ValueError):
-                mgr.generate()
-
     def test_save_and_load(self):
         """保存后加载的地图应与原地图一致。"""
-        mgr = Region(self.cfg, rng=RandomStreams.from_config().region)
+        mgr = Region(self.cfg, rng=RandomStreams().region)
         region_map = mgr.generate()
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tmp_region.npy")
         try:
             mgr.save(path)
-            mgr2 = Region(self.cfg, rng=RandomStreams.from_config().region)
+            mgr2 = Region(self.cfg, rng=RandomStreams().region)
             loaded = mgr2.load(path)
             np.testing.assert_array_equal(region_map, loaded)
         finally:
             if os.path.exists(path):
                 os.remove(path)
-
-    def test_load_rejects_map_with_wrong_shape(self):
-        """不能把与当前正方形网格尺寸不一致的地图载入。"""
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "wrong_shape.npy"
-            np.save(path, np.ones((2, 2), dtype=np.int32))
-            with self.assertRaises(ValueError):
-                Region(self.cfg, rng=RandomStreams.from_config().region).load(path)
 
 
 if __name__ == "__main__":

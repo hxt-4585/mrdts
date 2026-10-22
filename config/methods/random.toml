@@ -1,7 +1,9 @@
-[method]
-solution = "random"
-
-[method.components]
-ordering = "ers"
-flight = "random"
-scheduling = "random"
+# Random 方法的运行参数。
+[run]
+seed = 42
+episodes = 2
+output_root = "results"
+# 用户数和每个 DAG 的节点数默认读取 config/user.toml、config/dag.toml。
+# 如需覆盖，取消下面的注释；也可使用 --users 和 --dag-nodes。
+# users = 100
+# dag_nodes = 10
