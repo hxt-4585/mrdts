@@ -13,7 +13,6 @@ class MemberPropulsionConfig:
     u2: float
     u3: float
     u4: float
-    u5: float
     tip_speed: float
 
 
@@ -64,7 +63,6 @@ class UAVConfig:
                 u2=member["u2"],
                 u3=member["u3"],
                 u4=member["u4"],
-                u5=member["u5"],
                 tip_speed=member["tip_speed"],
             ),
             member_capacitance_factor=member["capacitance_factor"],

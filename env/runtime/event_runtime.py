@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import heapq
 from itertools import count
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 import numpy as np
 
@@ -14,8 +14,8 @@ from env.contracts import DAGRequest, PlacementDecision
 from env.settings import EnvConfig
 from env.runtime.channel_queue import DirectedChannelState, TransferJob
 from env.runtime.dag_runtime import DAGRuntime
-from env.runtime.server_queue import ServerState
-from env.runtime.slot_result import DAGResult, SlotResult
+from env.runtime.server_queue import ComputeRecord, ServerState
+from env.runtime.slot_result import DAGResult, MemberEnergyResult, SlotResult
 from env.runtime.task_runtime import TaskRuntime, TaskStatus, TransferRecord
 from env.types import DirectedChannelKey, EntityKind, EntityRef, TaskKey
 
@@ -56,12 +56,20 @@ class SchedulingRuntime:
         *,
         slot_start: float = 0.0,
         max_duration_s: float | None = None,
+        on_member_energy: Callable[[EntityRef, float], None] | None = None,
+        on_time_advance: Callable[[float], None] | None = None,
     ):
         self._slot_start = float(slot_start)
         duration = float(max_duration_s if max_duration_s is not None else EnvConfig.default().scheduling_duration_s)
         self._deadline = self._slot_start + duration
         self._closed = False
         self._result: SlotResult | None = None
+        # 环境接收事件增量以更新队列；独立运行时也保留逐 Member 结算明细。
+        self._on_member_energy = on_member_energy
+        self._on_time_advance = on_time_advance
+        self._member_energy = {
+            node: [0.0, 0.0] for node in servers if node.kind is EntityKind.MEMBER_UAV
+        }
         self.channel_model = channel_model
         self.entity_positions = {
             entity: np.array(position, dtype=float, copy=True) for entity, position in entity_positions.items()
@@ -187,7 +195,7 @@ class SchedulingRuntime:
         limit = min(float(absolute_time), self.deadline)
         while not self.closed and not self._ready_members:
             if not self._events:
-                self.now = limit
+                self._advance_clock(limit)
                 if limit == self.deadline:
                     self._close_slot()
                 break
@@ -202,7 +210,7 @@ class SchedulingRuntime:
     def _process_events_until(self, absolute_time: float) -> None:
         while self._events and self._events[0][0] <= absolute_time:
             timestamp = self._events[0][0]
-            self.now = timestamp
+            self._advance_clock(timestamp)
             # 先处理这个时刻已有的全部完成事件，再派发；即时事件继续闭包处理。
             while self._events and self._events[0][0] == timestamp:
                 _, _, event_type, payload = heapq.heappop(self._events)
@@ -211,7 +219,32 @@ class SchedulingRuntime:
                 else:
                     self._handle_transfer_finish(payload, timestamp)
             self._dispatch(timestamp)
-        self.now = absolute_time
+        self._advance_clock(absolute_time)
+
+    def _advance_clock(self, at: float) -> None:
+        elapsed = at - self.now
+        self.now = at
+        if elapsed and self._on_time_advance is not None:
+            self._on_time_advance(elapsed)
+
+    def _record_member_energy(self, node: EntityRef, amount: float, component: int) -> None:
+        """component 为 0（计算）或 1（发送），调用方仅传入 Member。"""
+        self._member_energy[node][component] += amount
+        if self._on_member_energy is not None:
+            self._on_member_energy(node, amount)
+
+    def _settle_transfer_energy(self, transfer_id: str, elapsed: float) -> None:
+        source = self._transfer_channel[transfer_id].source
+        if source.kind is EntityKind.MEMBER_UAV:
+            binding = self._transfer_bindings[transfer_id]
+            energy = binding.power_w * elapsed
+            binding.record.tx_energy_j += energy
+            self._record_member_energy(source, energy, 1)
+
+    def _settle_compute_energy(self, node: EntityRef, record: ComputeRecord, energy: float) -> None:
+        if node.kind is EntityKind.MEMBER_UAV:
+            self.tasks[record.task_key].compute_energy_j = energy
+            self._record_member_energy(node, energy, 0)
 
     def finish_slot(self) -> SlotResult:
         """截止结算；不再索取动作，尚未提交的任务也计入失败。"""
@@ -221,20 +254,18 @@ class SchedulingRuntime:
         return self._result
 
     def _close_slot(self) -> None:
-        # 启动时预记了完整作业能耗；取消时扣除窗口以后的部分。
+        # 已完成作业已按事件结算；这里只补记仍在运行的作业在截止前的部分。
         for channel in self.channels.values():
             job = channel.active
             if job is not None:
-                binding = self._transfer_bindings[job.transfer_id]
-                binding.record.tx_energy_j -= binding.power_w * (job.finish_at - self.deadline)
-                binding.record.tx_energy_j = max(0.0, binding.record.tx_energy_j)
+                self._settle_transfer_energy(job.transfer_id, self.deadline - job.start_at)
             channel.queued.clear()
             channel.active = None
         for server in self.servers.values():
             for record in server.running.values():
                 elapsed = self.deadline - record.start_at
                 duration = record.finish_at - record.start_at
-                self.tasks[record.task_key].compute_energy_j = record.energy_j * elapsed / duration
+                self._settle_compute_energy(server.node, record, record.energy_j * elapsed / duration)
             server.queue.clear()
             server.running.clear()
         for task in self.tasks.values():
@@ -248,10 +279,10 @@ class SchedulingRuntime:
             slot_end=self.deadline,
             dags=tuple(DAGResult(key, dag.completion_time, dag.failed_at is not None)
                        for key, dag in sorted(self.dag_runtimes.items())),
-            compute_energy_j=sum(task.compute_energy_j for task in self.tasks.values()),
-            tx_energy_j=sum(record.tx_energy_j for task in self.tasks.values()
-                            for record in (task.input_record, *task.predecessor_records.values())
-                            if record is not None),
+            compute_energy_j=sum(energy[0] for energy in self._member_energy.values()),
+            tx_energy_j=sum(energy[1] for energy in self._member_energy.values()),
+            member_energy=tuple(MemberEnergyResult(node.index, *energy)
+                                for node, energy in sorted(self._member_energy.items())),
         )
         self._events.clear()
         self._ready_for_server.clear()
@@ -349,7 +380,8 @@ class SchedulingRuntime:
 
     def _handle_transfer_finish(self, transfer_id: str, at: float) -> None:
         state = self.channels[self._transfer_channel[transfer_id]]
-        state.finish_active(at)
+        job = state.finish_active(at)
+        self._settle_transfer_energy(transfer_id, at - job.start_at)
         binding = self._transfer_bindings[transfer_id]
         if binding.next_transfer_id is not None:
             self._activate_transfer(binding.next_transfer_id, at)
@@ -364,6 +396,7 @@ class SchedulingRuntime:
     def _handle_compute_finish(self, payload: tuple[EntityRef, int], at: float) -> None:
         server_node, core_id = payload
         record = self.servers[server_node].finish(core_id, at)
+        self._settle_compute_energy(server_node, record, record.energy_j)
         task = self.tasks[record.task_key]
         task.mark_compute_finished(at)
         dag_key = (task.key.owner_member_id, task.key.user_id, task.key.dag_id)
@@ -394,14 +427,13 @@ class SchedulingRuntime:
             binding = self._transfer_bindings[job.transfer_id]
             if binding.record.start_at is None:
                 binding.record.start_at = at
-            binding.record.tx_energy_j += binding.power_w * job.duration_s
             heapq.heappush(
                 self._events, (job.finish_at, next(self._event_counter), "transfer_finish", job.transfer_id)
             )
         for server in self.servers.values():
             for record in server.dispatch(at):
                 task = self.tasks[record.task_key]
-                task.mark_compute_started(record.core_id, at, record.energy_j)
+                task.mark_compute_started(record.core_id, at)
                 heapq.heappush(
                     self._events,
                     (record.finish_at, next(self._event_counter), "compute_finish", (server.node, record.core_id)),

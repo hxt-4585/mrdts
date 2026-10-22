@@ -9,7 +9,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from env.env import MRDTSEnv
-from env.settings import DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
+from env.settings import ChannelConfig, DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
 
 
 def create_environment() -> MRDTSEnv:
@@ -20,6 +20,7 @@ def create_environment() -> MRDTSEnv:
         "region": RegionConfig.default(),
         "user": UserConfig.default(),
         "uav": UAVConfig.default(),
+        "channel": ChannelConfig.default(),
     }
     environment = MRDTSEnv(settings)
     environment.generate_scene()

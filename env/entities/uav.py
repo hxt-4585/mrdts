@@ -67,7 +67,7 @@ class MemberUAV(UAV):
         self.region_member_counts = None
         self.core_counts = None
         self.core_frequencies = None
-        # 每个计算节点当前时隙的能量虚拟队列 Q_i(t)，最后一行对应固定 BS。
+        # 仅 M 架 Member 的能量虚拟队列，不包含 BS。
         self.energy_virtual_queue_j = None
         super().__init__()
 
@@ -125,6 +125,17 @@ class MemberUAV(UAV):
         member_positions[in_bounds] = candidate_positions[in_bounds]
         return ~in_bounds
 
+    def propulsion_power(self, speed):
+        """按水平速率返回推进功率 W；零速率即悬停功率。
+
+        P(v)=u1*(1+3*v²/tip²)+u2*v³+u3*sqrt(sqrt(u4+v⁴/4)-v²/2)。
+        诱导项用分母有理化的等价式，避免两项相减造成精度损失。
+        """
+        p = self.config.member_propulsion
+        speed_squared = np.square(speed)
+        induced = np.sqrt(p.u4 / (np.sqrt(p.u4 + speed_squared**2 / 4.) + speed_squared / 2.))
+        return p.u1 * (1. + 3. * speed_squared / p.tip_speed**2) + p.u2 * speed_squared * speed + p.u3 * induced
+
     @staticmethod
     def _select_positions_near_master(region, region_id, master_position, count):
         """选择 Master 周围本区域的不同网格中心，水平间距至少一格。
@@ -167,5 +178,5 @@ class MemberUAV(UAV):
         self.region_member_counts = member_counts
         super().__init__(positions, region_ids)
         self._initialize_compute_resources()
-        self.energy_virtual_queue_j = np.zeros(self.num_uavs, dtype=float)
+        self.energy_virtual_queue_j = np.zeros(self.member_uav_count, dtype=float)
         return self.positions

@@ -12,7 +12,7 @@ from env.types import DirectedChannelKey, EntityKind, EntityRef
 from env.workload.dag_generator import DAG
 
 
-def make_runtime(duration=30.0, cores=1):
+def make_runtime(duration=30.0, cores=1, **runtime_options):
     members = tuple(EntityRef(EntityKind.MEMBER_UAV, i) for i in range(4))
     grounds = tuple(EntityRef(EntityKind.GROUND_DEVICE, i) for i in range(4))
     bs = EntityRef(EntityKind.BS, 0)
@@ -33,6 +33,7 @@ def make_runtime(duration=30.0, cores=1):
         {node: 1. for node in positions}, bandwidths,
         member_regions={node: 1 for node in members},
         ground_owner_members=dict(zip(grounds, members)), max_duration_s=duration,
+        **runtime_options,
     )
     return runtime, members, grounds, bs
 
@@ -140,9 +141,12 @@ class TestSerialRuntime(unittest.TestCase):
                                         fast.task_keys[0]: PlacementDecision(self.members[1])})
         self.runtime.advance_to_decision()
         self.submit(slow.task_keys[1], self.bs)
+        # 等待前驱的任务不增加服务器的计算等待时间。
+        self.assertEqual(self.runtime.servers[self.bs].compute_wait(self.runtime.now), 0.)
         self.runtime.advance_to_decision()
         self.submit(fast.task_keys[1], self.bs)
         self.assertEqual(self.runtime.trace(fast.task_keys[1]).compute_start_at, 2.)
+        self.assertEqual(self.runtime.servers[self.bs].compute_wait(self.runtime.now), 1.)
         self.assertFalse(self.runtime.servers[self.bs].queue)
         self.runtime.advance_to_decision()
         self.assertAlmostEqual(self.runtime.trace(slow.task_keys[1]).compute_start_at, 6.)
@@ -172,8 +176,8 @@ class TestSerialRuntime(unittest.TestCase):
         self.assertEqual(len(result.failed_dags), 3)
         self.assertEqual(self.runtime.trace(dags[3].task_keys[0]).compute_finish_at, 1.)
         self.assertIsNone(self.runtime.trace(dags[0].task_keys[1]).decision_at)
-        self.assertAlmostEqual(result.compute_energy_j, 20.)
-        self.assertAlmostEqual(result.tx_energy_j, 1.)
+        self.assertAlmostEqual(result.compute_energy_j, 10.)  # 仅 Member 3，排除 BS。
+        self.assertAlmostEqual(result.tx_energy_j, 0.)  # 截止前只有用户上传。
         self.assertFalse(self.runtime.active_tasks)
         self.assertEqual(self.runtime.ready_member_ids, ())
         self.assertIs(result, self.runtime.finish_slot())
