@@ -7,6 +7,7 @@ from env.types import EntityRef, TaskKey
 
 
 class TaskStatus(str, Enum):
+    UNSCHEDULED = "unscheduled"
     WAITING_DATA = "waiting_data"
     QUEUED_COMPUTE = "queued_compute"
     RUNNING = "running"
@@ -25,12 +26,12 @@ class TransferRecord:
 @dataclass
 class TaskRuntime:
     key: TaskKey
-    execution_node: EntityRef
-    priority_seq: int
     cpu_cycles: float
     input_bits: float
     predecessors: set[TaskKey]
-    status: TaskStatus = field(default=TaskStatus.WAITING_DATA, init=False)
+    execution_node: EntityRef | None = None
+    decision_at: float | None = None
+    status: TaskStatus = field(default=TaskStatus.UNSCHEDULED, init=False)
     input_record: TransferRecord | None = None
     predecessor_records: dict[TaskKey, TransferRecord] = field(default_factory=dict)
     input_arrival_at: float | None = None
@@ -64,7 +65,7 @@ class TaskRuntime:
     def _update_data_ready(self) -> bool:
         if self.data_ready_at is not None:
             return False
-        if self.input_arrival_at is None or set(self.predecessor_arrival_at) != self.predecessors:
+        if self.input_arrival_at is None or len(self.predecessor_arrival_at) != len(self.predecessors):
             return False
         self.data_ready_at = max([self.input_arrival_at, *self.predecessor_arrival_at.values()])
         self.compute_queue_enter_at = self.data_ready_at

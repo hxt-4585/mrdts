@@ -18,7 +18,6 @@ class TransferJob:
     """等待源数据就绪的单次、不可抢占传输。"""
 
     transfer_id: str
-    priority_seq: int
     source_ready_at: float | None
     duration_s: float
     status: TransferStatus = field(default=TransferStatus.QUEUED, init=False)
@@ -33,20 +32,15 @@ class TransferJob:
 
 @dataclass
 class DirectedChannelState:
-    """一个有向信道的 ERS 队列；不与任何其他信道共享状态。"""
+    """一个有向信道的 FIFO 队列；仅将源数据已就绪的作业入队。"""
 
     key: DirectedChannelKey
     queued: deque[TransferJob] = field(default_factory=deque)
     active: TransferJob | None = None
     next_free_at: float = 0.0
-    _jobs: dict[str, TransferJob] = field(default_factory=dict, init=False, repr=False)
 
     def enqueue(self, job: TransferJob) -> None:
         self.queued.append(job)
-        self._jobs[job.transfer_id] = job
-
-    def mark_source_ready(self, transfer_id: str, at: float) -> None:
-        self._jobs[transfer_id].source_ready_at = float(at)
 
     def start_head(self, now: float) -> TransferJob | None:
         now = float(now)

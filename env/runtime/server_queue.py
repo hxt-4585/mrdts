@@ -20,7 +20,6 @@ class _QueuedCompute:
     task_key: TaskKey
     cpu_cycles: float
     ready_at: float
-    priority_seq: int
 
 
 @dataclass
@@ -35,8 +34,8 @@ class ServerState:
     def queued_task_keys(self) -> tuple[TaskKey, ...]:
         return tuple(item.task_key for item in self.queue)
 
-    def enqueue(self, task_key: TaskKey, cpu_cycles: float, ready_at: float, priority_seq: int) -> None:
-        self.queue.append(_QueuedCompute(task_key, float(cpu_cycles), float(ready_at), priority_seq))
+    def enqueue(self, task_key: TaskKey, cpu_cycles: float, ready_at: float) -> None:
+        self.queue.append(_QueuedCompute(task_key, float(cpu_cycles), float(ready_at)))
 
     def dispatch(self, now: float) -> tuple[ComputeRecord, ...]:
         idle = [core_id for core_id in range(len(self.core_frequencies)) if core_id not in self.running]

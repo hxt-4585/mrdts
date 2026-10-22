@@ -11,12 +11,11 @@ class PlacementDecision:
     """智能体对一个子任务给出的执行位置，不预先伪造执行时间。"""
 
     execution_node: EntityRef
-    priority_seq: int
 
 
 @dataclass(frozen=True)
 class DAGRequest:
-    """当前时隙待排序的 DAG；执行位置由后续卸载策略选择。"""
+    """当前时隙登记的 DAG；排序和执行位置由 method 决定。"""
 
     dag_id: int
     dag: DAG

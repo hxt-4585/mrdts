@@ -1,7 +1,6 @@
 """单个时隙内多 DAG 传输与计算的离散事件运行时。"""
 
 from collections import defaultdict
-from copy import copy
 from dataclasses import dataclass
 import heapq
 from itertools import count
@@ -19,7 +18,6 @@ from env.runtime.server_queue import ServerState
 from env.runtime.slot_result import DAGResult, SlotResult
 from env.runtime.task_runtime import TaskRuntime, TaskStatus, TransferRecord
 from env.types import DirectedChannelKey, EntityKind, EntityRef, TaskKey
-from env.workload.dag_generator import DAG
 
 
 @dataclass(frozen=True)
@@ -38,18 +36,13 @@ class _TransferBinding:
     is_input: bool = False
 
 
-@dataclass
-class _PreparedDAG:
-    key: tuple[int, int, int]
-    tasks: dict[TaskKey, TaskRuntime]
-    runtime: DAGRuntime
-    pending: list[tuple[DirectedChannelKey, TransferJob, _TransferBinding]]
-    outgoing: dict[TaskKey, list[str]]
-    local_successors: dict[TaskKey, list[TaskKey]]
-
-
 class SchedulingRuntime:
-    """将 placement 解释为传输、数据依赖及 FIFO 计算事件。"""
+    """执行在线卸载动作；任务顺序和策略均由调用方持有。
+
+    调用约定：先 register_dags，再为 ready_member_ids 中每个 Member
+    选择一个未调度且前驱已完成的子任务，统一 submit_placements。
+    每个 Member 最多一个活动子任务；推进到下一个决策点后重复。
+    """
 
     def __init__(
         self,
@@ -89,13 +82,15 @@ class SchedulingRuntime:
         self.dag_runtimes: dict[tuple[int, int, int], DAGRuntime] = {}
         self._transfer_channel: dict[str, DirectedChannelKey] = {}
         self._transfer_bindings: dict[str, _TransferBinding] = {}
-        self._outgoing_transfers: dict[TaskKey, list[str]] = defaultdict(list)
-        self._local_successors: dict[TaskKey, list[TaskKey]] = defaultdict(list)
+        self.transfer_jobs: dict[str, TransferJob] = {}
+        self._requests: dict[tuple[int, int, int], DAGRequest] = {}
+        self.active_tasks: dict[int, TaskKey] = {}
+        self._remaining_tasks: dict[int, int] = defaultdict(int)
+        self._ready_members: set[int] = set()
         self._ready_for_server: set[TaskKey] = set()
         self._events: list[tuple[float, int, str, object]] = []
         self._event_counter = count()
         self._transfer_counter = count()
-        self._next_priority_seq = 0
         self.now = self.slot_start
         if member_regions is not None or ground_owner_members is not None:
             self.update_topology(member_regions, ground_owner_members)
@@ -112,138 +107,117 @@ class SchedulingRuntime:
     def closed(self) -> bool:
         return self._closed
 
-    def submit_dag(
-        self,
-        dag_id: int,
-        dag: DAG,
-        owner_member: EntityRef,
-        ground_device: EntityRef,
-        placements: Mapping[int, PlacementDecision],
-        epoch_start: float,
-    ) -> tuple[TaskKey, ...]:
-        """单 DAG 便捷入口；统一多 DAG 排序请使用 submit_dags。"""
-        request = DAGRequest(dag_id, dag, owner_member, ground_device)
-        return self.submit_dags(
-            [request], {key: placements[key.node_id] for key in request.task_keys}, epoch_start)
+    @property
+    def ready_member_ids(self) -> tuple[int, ...]:
+        """当前可接受下一次决策的 Member；不替 method 选择任务。"""
+        return tuple(sorted(self._ready_members))
 
-    def submit_dags(
-        self,
-        requests: Iterable[DAGRequest],
-        placements: Mapping[TaskKey, PlacementDecision],
-        epoch_start: float,
-    ) -> tuple[TaskKey, ...]:
-        """整批准备成功后统一入队和启动，保留跨 DAG 的相对优先顺序。
+    def register_dags(self, requests: Iterable[DAGRequest]) -> tuple[TaskKey, ...]:
+        """登记窗口工作负载，不确定位置、不发送数据、不预占资源。"""
+        keys = []
+        for request in sorted(requests, key=lambda item: item.key):
+            self._requests[request.key] = request
+            self.dag_runtimes[request.key] = DAGRuntime(request.dag)
+            node_keys = request.task_keys
+            predecessors = {key: set() for key in node_keys}
+            for parent, child in request.dag.edges:
+                predecessors[node_keys[child]].add(node_keys[parent])
+            for key in node_keys:
+                features = request.dag.node_features[key.node_id]
+                self.tasks[key] = TaskRuntime(
+                    key=key, cpu_cycles=float(features[1]), input_bits=float(features[0]) * 1000.,
+                    predecessors=predecessors[key],
+                )
+            member_id = request.owner_member.index
+            self._remaining_tasks[member_id] += len(node_keys)
+            if node_keys and member_id not in self.active_tasks:
+                self._ready_members.add(member_id)
+            keys.extend(node_keys)
+        return tuple(keys)
 
-        本批序号压缩为连续编号并追加在已提交批次之后；已经启动的任务
-        不参与重新排序。一个 Member 的同批 DAG 应先一起调用排序组件。
+    def submit_placements(self, placements: Mapping[TaskKey, PlacementDecision]) -> None:
+        """提交当前决策批次，每个可决策 Member 至多一个任务。
+
+        调用方先基于同一时刻的状态完成本批全部观测与策略选择，再提交。
+        TaskKey 仅用于同时提交时的稳定平局顺序，不代表策略优先级。
         """
-        epoch_start = float(epoch_start)
-        requests = tuple(requests)
-        order = sorted(placements, key=lambda key: placements[key].priority_seq)
-        global_priority = {key: self._next_priority_seq + i for i, key in enumerate(order)}
-        # 预备阶段仅修改局部状态，连传输 ID 计数也在成功后才提交。
-        transfer_counter = copy(self._transfer_counter)
-        prepared = [self._prepare_dag(request, placements, global_priority, epoch_start, transfer_counter)
-                    for request in sorted(requests, key=lambda item: item.key)]
-        pending = [item for dag in prepared for item in dag.pending]
-        for dag in prepared:
-            self.tasks.update(dag.tasks)
-            self.dag_runtimes[dag.key] = dag.runtime
-            for key, transfers in dag.outgoing.items():
-                self._outgoing_transfers[key].extend(transfers)
-            for key, children in dag.local_successors.items():
-                self._local_successors[key].extend(children)
-            self._ready_for_server.update(key for key, task in dag.tasks.items() if task.data_ready_at is not None)
-        for key, job, binding in sorted(pending, key=lambda item: (
-            item[0].source, item[0].target, item[1].priority_seq, item[1].transfer_id
-        )):
-            state = self.channels.setdefault(key, DirectedChannelState(key))
-            state.enqueue(job)
-            self._transfer_channel[job.transfer_id] = key
-            self._transfer_bindings[job.transfer_id] = binding
-        self._next_priority_seq += len(order)
-        self._transfer_counter = transfer_counter
+        for key in sorted(placements):
+            task = self.tasks[key]
+            request = self._requests[key.owner_member_id, key.user_id, key.dag_id]
+            task.execution_node = placements[key].execution_node
+            task.decision_at = self.now
+            task.status = TaskStatus.WAITING_DATA
+            self.active_tasks[key.owner_member_id] = key
+            self._ready_members.remove(key.owner_member_id)
+            route = self.route_planner.input_route(
+                request.ground_device, request.owner_member, task.execution_node)
+            task.input_record = self._submit_data(task, route.hops, task.input_bits, is_input=True)
+            for parent_key in sorted(task.predecessors):
+                parent = self.tasks[parent_key]
+                route = self.route_planner.predecessor_route(
+                    parent.execution_node, task.execution_node, request.ground_device, request.owner_member)
+                bits = float(request.dag.edge_features[parent_key.node_id, key.node_id]) * 1000.
+                task.predecessor_records[parent_key] = self._submit_data(
+                    task, route.hops, bits, predecessor=parent_key)
         self._dispatch(self.now)
-        return tuple(key for dag in prepared for key in dag.tasks)
+        # 零时长传输/计算也须完成当前时刻的事件后才能重新观测。
+        self._process_events_until(self.now)
 
-    def _prepare_dag(
-        self, request: DAGRequest, placements: Mapping[TaskKey, PlacementDecision],
-        global_priority: Mapping[TaskKey, int], epoch_start: float, transfer_counter: count,
-    ) -> _PreparedDAG:
-        dag, ground_device, owner_member = request.dag, request.ground_device, request.owner_member
-        prepared = _PreparedDAG(request.key, {}, DAGRuntime(dag), [], defaultdict(list), defaultdict(list))
-        predecessors = {node: set() for node in range(dag.node_num)}
-        for parent, child in dag.edges:
-            predecessors[child].add(parent)
-        node_keys = {key.node_id: key for key in request.task_keys}
-        for node, key in node_keys.items():
-            decision = placements[key]
-            prepared.tasks[key] = TaskRuntime(
-                key=key,
-                execution_node=decision.execution_node,
-                priority_seq=global_priority[key],
-                cpu_cycles=float(dag.node_features[node, 1]),
-                input_bits=float(dag.node_features[node, 0]) * 1000.0,
-                predecessors={node_keys[parent] for parent in predecessors[node]},
-            )
-        for node, key in node_keys.items():
-            task = prepared.tasks[key]
-            route = self.route_planner.input_route(ground_device, owner_member, task.execution_node)
-            if not route.hops or task.input_bits == 0:
-                task.input_record = TransferRecord(
-                    (), start_at=float(epoch_start), finish_at=float(epoch_start)
-                )
-                task.mark_input_arrived(epoch_start)
-            else:
-                task.input_record = self._append_route(
-                    prepared.pending, route.hops, task, task.input_bits, epoch_start,
-                    transfer_counter, is_input=True
-                )
-        for parent, child in dag.edges:
-            parent_task = prepared.tasks[node_keys[parent]]
-            child_task = prepared.tasks[node_keys[child]]
-            result_bits = float(dag.edge_features[(parent, child)]) * 1000.0
-            route = self.route_planner.predecessor_route(
-                parent_task.execution_node,
-                child_task.execution_node,
-                ground_device,
-                owner_member,
-            )
-            if not route.hops or result_bits == 0:
-                record = TransferRecord(())
-                child_task.predecessor_records[parent_task.key] = record
-                prepared.local_successors[parent_task.key].append(child_task.key)
-            else:
-                record = self._append_route(
-                    prepared.pending, route.hops, child_task, result_bits, None,
-                    transfer_counter, predecessor=parent_task.key
-                )
-                child_task.predecessor_records[parent_task.key] = record
-                prepared.outgoing[parent_task.key].append(record.transfer_ids[0])
-        return prepared
+    def _submit_data(
+        self, task: TaskRuntime, hops: tuple[DirectedChannelKey, ...], bits: float,
+        *, is_input: bool = False, predecessor: TaskKey | None = None,
+    ) -> TransferRecord:
+        if not hops or bits == 0:
+            record = TransferRecord((), start_at=self.now, finish_at=self.now)
+            ready = (task.mark_input_arrived(self.now) if is_input
+                     else task.mark_predecessor_arrived(predecessor, self.now))
+            if ready:
+                self._ready_for_server.add(task.key)
+            return record
+        return self._append_route(hops, task, bits, is_input=is_input, predecessor=predecessor)
 
-    def advance_until(self, absolute_time: float) -> None:
-        absolute_time = float(absolute_time)
+    def advance_to_decision(self) -> tuple[int, ...]:
+        """推进至最早的下一次决策机会、全部完成或窗口截止。"""
+        while self._events and not self._ready_members and not self.closed:
+            self.advance_until(self._events[0][0])
+        return self.ready_member_ids
+
+    def advance_until(self, absolute_time: float) -> tuple[int, ...]:
+        """推进至给定上限；出现可决策 Member 时立即停下，不越过决策点。"""
+        limit = min(float(absolute_time), self.deadline)
+        while not self.closed and not self._ready_members:
+            if not self._events:
+                self.now = limit
+                if limit == self.deadline:
+                    self._close_slot()
+                break
+            timestamp = min(self._events[0][0], limit)
+            self._process_events_until(timestamp)
+            if self.now == self.deadline:
+                self._close_slot()
+            if timestamp == limit:
+                break
+        return self.ready_member_ids
+
+    def _process_events_until(self, absolute_time: float) -> None:
         while self._events and self._events[0][0] <= absolute_time:
             timestamp = self._events[0][0]
-            batch: list[tuple[float, int, str, object]] = []
-            while self._events and self._events[0][0] == timestamp:
-                batch.append(heapq.heappop(self._events))
             self.now = timestamp
-            for _, _, event_type, payload in sorted(batch, key=lambda event: event[2]):
+            # 先处理这个时刻已有的全部完成事件，再派发；即时事件继续闭包处理。
+            while self._events and self._events[0][0] == timestamp:
+                _, _, event_type, payload = heapq.heappop(self._events)
                 if event_type == "compute_finish":
                     self._handle_compute_finish(payload, timestamp)
                 else:
                     self._handle_transfer_finish(payload, timestamp)
             self._dispatch(timestamp)
         self.now = absolute_time
-        if self.now == self.deadline:
-            self._close_slot()
 
     def finish_slot(self) -> SlotResult:
-        """执行到截止时刻并关闭；重复调用只返回同一份结果。"""
+        """截止结算；不再索取动作，尚未提交的任务也计入失败。"""
         if not self.closed:
-            self.advance_until(self.deadline)
+            self._process_events_until(self.deadline)
+            self._close_slot()
         return self._result
 
     def _close_slot(self) -> None:
@@ -284,8 +258,8 @@ class SchedulingRuntime:
         self.channels.clear()
         self._transfer_channel.clear()
         self._transfer_bindings.clear()
-        self._outgoing_transfers.clear()
-        self._local_successors.clear()
+        self.active_tasks.clear()
+        self._ready_members.clear()
         self._closed = True
 
     def trace(self, task_key: TaskKey) -> TaskRuntime:
@@ -310,41 +284,33 @@ class SchedulingRuntime:
         self.ground_owner_members = dict(ground_owner_members)
 
     def _append_route(
-        self,
-        pending: list[tuple[DirectedChannelKey, TransferJob, _TransferBinding]],
-        hops: tuple[DirectedChannelKey, ...],
-        task: TaskRuntime,
-        payload_bits: float,
-        source_ready_at: float | None,
-        transfer_counter: count,
-        is_input: bool = False,
-        predecessor: TaskKey | None = None,
+        self, hops: tuple[DirectedChannelKey, ...], task: TaskRuntime, payload_bits: float,
+        *, is_input: bool = False, predecessor: TaskKey | None = None,
     ) -> TransferRecord:
-        transfer_ids = tuple(f"tx-{next(transfer_counter)}" for _ in hops)
+        transfer_ids = tuple(f"tx-{next(self._transfer_counter)}" for _ in hops)
         record = TransferRecord(transfer_ids)
-        for index, hop in enumerate(hops):
-            transfer_id = transfer_ids[index]
-            job = TransferJob(
-                transfer_id=transfer_id,
-                priority_seq=task.priority_seq,
-                source_ready_at=source_ready_at if index == 0 else None,
+        for index, (hop, transfer_id) in enumerate(zip(hops, transfer_ids)):
+            self.transfer_jobs[transfer_id] = TransferJob(
+                transfer_id=transfer_id, source_ready_at=None,
                 duration_s=self.transfer_duration_s(hop, payload_bits),
             )
-            pending.append(
-                (
-                    hop,
-                    job,
-                    _TransferBinding(
-                        task.key,
-                        record,
-                        self.transmit_powers[hop.source],
-                        next_transfer_id=transfer_ids[index + 1] if index + 1 < len(hops) else None,
-                        predecessor=predecessor,
-                        is_input=is_input,
-                    ),
-                )
+            self._transfer_channel[transfer_id] = hop
+            self._transfer_bindings[transfer_id] = _TransferBinding(
+                task.key, record, self.transmit_powers[hop.source],
+                next_transfer_id=transfer_ids[index + 1] if index + 1 < len(hops) else None,
+                predecessor=predecessor, is_input=is_input,
             )
+        self._activate_transfer(transfer_ids[0], self.now)
         return record
+
+    def _activate_transfer(self, transfer_id: str, at: float) -> None:
+        job = self.transfer_jobs[transfer_id]
+        job.source_ready_at = at
+        key = self._transfer_channel[transfer_id]
+        state = self.channels.get(key)
+        if state is None:
+            state = self.channels[key] = DirectedChannelState(key)
+        state.enqueue(job)
 
     def transfer_duration_s(self, hop: DirectedChannelKey, payload_bits: float) -> float:
         """当前物理快照上的单跳时延，不含排队；排序和实际执行共用。"""
@@ -386,8 +352,7 @@ class SchedulingRuntime:
         state.finish_active(at)
         binding = self._transfer_bindings[transfer_id]
         if binding.next_transfer_id is not None:
-            next_key = self._transfer_channel[binding.next_transfer_id]
-            self.channels[next_key].mark_source_ready(binding.next_transfer_id, at)
+            self._activate_transfer(binding.next_transfer_id, at)
             return
         binding.record.finish_at = at
         if binding.predecessor is not None:
@@ -403,26 +368,22 @@ class SchedulingRuntime:
         task.mark_compute_finished(at)
         dag_key = (task.key.owner_member_id, task.key.user_id, task.key.dag_id)
         self.dag_runtimes[dag_key].mark_finished(task.key.node_id, at)
-        for transfer_id in self._outgoing_transfers[task.key]:
-            key = self._transfer_channel[transfer_id]
-            self.channels[key].mark_source_ready(transfer_id, at)
-        for child_key in self._local_successors[task.key]:
-            child = self.tasks[child_key]
-            child.predecessor_records[task.key].start_at = at
-            child.predecessor_records[task.key].finish_at = at
-            if child.mark_predecessor_arrived(task.key, at):
-                self._ready_for_server.add(child_key)
+        member_id = task.key.owner_member_id
+        del self.active_tasks[member_id]
+        self._remaining_tasks[member_id] -= 1
+        if self._remaining_tasks[member_id] and at < self.deadline:
+            self._ready_members.add(member_id)
 
     def _dispatch(self, at: float) -> None:
         if at >= self.deadline:
             return
         for task_key in sorted(
             self._ready_for_server,
-            key=lambda key: (self.tasks[key].data_ready_at, self.tasks[key].priority_seq, key),
+            key=lambda key: (self.tasks[key].data_ready_at, key),
         ):
             task = self.tasks[task_key]
             self.servers[task.execution_node].enqueue(
-                task.key, task.cpu_cycles, task.data_ready_at, task.priority_seq
+                task.key, task.cpu_cycles, task.data_ready_at
             )
         self._ready_for_server.clear()
         for key in sorted(self.channels, key=lambda channel: (channel.source, channel.target)):

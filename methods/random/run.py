@@ -29,6 +29,7 @@ from env.simulator import Simulator
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAGGenerator
 from methods.random.ers import ERS
+from methods.scheduling import run_online_schedule
 
 
 class RandomStreams:
@@ -71,16 +72,6 @@ def build_scene(settings, streams):
     return region, users, simulator, generator
 
 
-def random_placements(runtime, requests, order, rng):
-    candidates = {request.key: runtime.candidate_execution_nodes(
-        request.owner_member, request.ground_device) for request in requests}
-    placements = {}
-    for seq, key in enumerate(order):
-        nodes = candidates[key.owner_member_id, key.user_id, key.dag_id]
-        placements[key] = PlacementDecision(nodes[int(rng.integers(len(nodes)))], seq)
-    return placements
-
-
 def run_slot(scene, streams, slot):
     region, users, simulator, generator = scene
     # Master 固定；为每架 Member 独立采样两个水平动作分量。
@@ -92,9 +83,16 @@ def run_slot(scene, streams, slot):
         EntityRef(EntityKind.MEMBER_UAV, int(simulator.user_member_ids[user_id])),
         EntityRef(EntityKind.GROUND_DEVICE, user_id),
     ) for user_id in range(users.num_users))
-    order = ERS(runtime).plan(requests).order
-    placements = random_placements(runtime, requests, order, streams.scheduling)
-    runtime.submit_dags(requests, placements, runtime.slot_start)
+    plan = ERS(runtime).plan(requests)
+    runtime.register_dags(requests)
+    candidates = {request.key: runtime.candidate_execution_nodes(
+        request.owner_member, request.ground_device) for request in requests}
+
+    def choose_placement(key):
+        nodes = candidates[key.owner_member_id, key.user_id, key.dag_id]
+        return PlacementDecision(nodes[int(streams.scheduling.integers(len(nodes)))])
+
+    run_online_schedule(runtime, plan.member_orders, choose_placement)
     return simulator.end_slot(), int(np.count_nonzero(violations))
 
 

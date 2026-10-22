@@ -14,7 +14,8 @@ from env.runtime.task_runtime import TaskStatus
 from env.simulator import Simulator
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
-from scripts.ers import ERS
+from methods.random.ers import ERS
+from methods.scheduling import run_online_schedule
 
 
 class TestMultiSlotScheduling(unittest.TestCase):
@@ -59,10 +60,13 @@ class TestMultiSlotScheduling(unittest.TestCase):
                     ground_device=EntityRef(EntityKind.GROUND_DEVICE, user_id)))
 
             plan = ERS(self.runtime).plan(requests)
-            placements = {key: PlacementDecision(self._random_execution_node(key.user_id, key.owner_member_id), seq)
-                          for seq, key in enumerate(plan.order)}
-            slot_task_keys = self.runtime.submit_dags(requests, placements, slot_start)
-            self.assertEqual(tuple(sorted(slot_task_keys, key=lambda key: self.runtime.trace(key).priority_seq)), plan.order)
+            slot_task_keys = self.runtime.register_dags(requests)
+            run_online_schedule(self.runtime, plan.member_orders, lambda key: PlacementDecision(
+                self._random_execution_node(key.user_id, key.owner_member_id)))
+            for order in plan.member_orders.values():
+                for previous, current in zip(order, order[1:]):
+                    self.assertEqual(self.runtime.trace(current).decision_at,
+                                     self.runtime.trace(previous).compute_finish_at)
 
             slot_end = slot_start + self.max_duration_s
             result = self.environment.end_slot()
@@ -78,10 +82,6 @@ class TestMultiSlotScheduling(unittest.TestCase):
 
             self.assertEqual(set(self.runtime.tasks), set(slot_task_keys))
             self.assertEqual(len(self.runtime.dag_runtimes), self.DAGS_PER_SLOT)
-            self.assertEqual(
-                sorted(task.priority_seq for task in self.runtime.tasks.values()),
-                list(range(len(slot_task_keys))),
-            )
 
     def test_unfinished_dag_does_not_occupy_next_slot_resources(self):
         actions = np.zeros((self.members.member_uav_count, 2))
@@ -89,7 +89,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
         ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
         owner = EntityRef(EntityKind.MEMBER_UAV, int(self.user_member_ids[0]))
         bs = EntityRef(EntityKind.BS, 0)
-        # 人为加大负载，让窗口结束时同时保留计算占用、计算排队和传输占用。
+        # 人为加大负载，让窗口结束时保留运行中任务与未调度任务。
         overloaded_dag = DAG(
             node_num=3,
             edges=[],
@@ -100,21 +100,15 @@ class TestMultiSlotScheduling(unittest.TestCase):
             ]),
             edge_features={},
         )
-        self.runtime.submit_dag(
-            dag_id=0, dag=overloaded_dag, owner_member=owner, ground_device=ground,
-            placements={
-                0: PlacementDecision(ground, 0),
-                1: PlacementDecision(ground, 1),
-                2: PlacementDecision(bs, 2),
-            },
-            epoch_start=0.0,
-        )
+        request = DAGRequest(0, overloaded_dag, owner, ground)
+        keys = self.runtime.register_dags([request])
+        self.runtime.submit_placements({keys[0]: PlacementDecision(ground)})
         self.runtime.advance_until(self.max_duration_s / 2.0)
         previous_runtime = self.runtime
         self.assertFalse(next(iter(previous_runtime.dag_runtimes.values())).is_finished)
         self.assertTrue(previous_runtime.servers[ground].running)
-        self.assertTrue(previous_runtime.servers[ground].queue)
-        self.assertTrue(any(channel.active is not None for channel in previous_runtime.channels.values()))
+        self.assertFalse(previous_runtime.servers[ground].queue)
+        self.assertTrue(all(previous_runtime.trace(key).status is TaskStatus.UNSCHEDULED for key in keys[1:]))
 
         result = self.environment.end_slot()
         self.assertEqual(result.failed_dags, ((owner.index, ground.index, 0),))
@@ -124,19 +118,14 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self._start_slot(actions)
         self._assert_empty_scheduling_state()
         self.assertIsNot(self.runtime, previous_runtime)
-        # 复用 DAG 标识，确认新时隙不受旧任务或旧 ERS 编号影响。
-        keys = self.runtime.submit_dag(
-            dag_id=0,
-            dag=DAG(1, [], np.array([[1.0, 1e7]]), {}),
-            owner_member=EntityRef(EntityKind.MEMBER_UAV, int(self.user_member_ids[0])),
-            ground_device=ground,
-            placements={0: PlacementDecision(ground, 0)},
-            epoch_start=self.max_duration_s,
-        )
+        # 复用 DAG 标识，确认新时隙不受旧任务或旧调度状态影响。
+        request = DAGRequest(0, DAG(1, [], np.array([[1., 1e7]]), {}),
+                             EntityRef(EntityKind.MEMBER_UAV, int(self.user_member_ids[0])), ground)
+        keys = self.runtime.register_dags([request])
+        self.runtime.submit_placements({keys[0]: PlacementDecision(ground)})
         self.environment.end_slot()
         task = self.runtime.trace(keys[0])
         self.assertEqual(task.status, TaskStatus.FINISHED)
-        self.assertEqual(task.priority_seq, 0)
         self.assertEqual(task.compute_start_at, self.max_duration_s)
         self.assertAlmostEqual(
             task.compute_finish_at,

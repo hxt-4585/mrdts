@@ -5,7 +5,8 @@ import unittest
 import numpy as np
 
 from env.communication.channel_model import ChannelModel
-from env.contracts import PlacementDecision
+from env.contracts import DAGRequest, PlacementDecision
+from methods.scheduling import run_online_schedule
 from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 from env.types import DirectedChannelKey, EntityKind, EntityRef
 from env.workload.dag_generator import DAG
@@ -53,170 +54,77 @@ class TestSchedulingRuntime(unittest.TestCase):
             edge_features={(0, 1): 1.0},
         )
 
+    def register(self, dag=None):
+        request = DAGRequest(0, dag or self.dag, self.member, self.ground)
+        return self.runtime.register_dags([request])
+
     def test_workload_sizes_are_decimal_kbit(self):
-        dag = DAG(
-            node_num=2,
-            edges=[(0, 1)],
-            node_features=np.array([[1.0, 1e7], [0.0, 1e7]]),
-            edge_features={(0, 1): 1.0},
-        )
-        keys = self.runtime.submit_dag(
-            dag_id=6,
-            dag=dag,
-            owner_member=self.member,
-            ground_device=self.ground,
-            placements={
-                0: PlacementDecision(self.member, priority_seq=0),
-                1: PlacementDecision(self.bs, priority_seq=1),
-            },
-            epoch_start=0.0,
-        )
-
-        parent = self.runtime.trace(keys[0])
-        child = self.runtime.trace(keys[1])
+        parent, child = self.register()
+        self.runtime.submit_placements({parent: PlacementDecision(self.member)})
         input_hop = DirectedChannelKey(self.ground, self.member)
+        self.assertEqual(self.runtime.trace(parent).input_bits, 1000.)
+        self.assertAlmostEqual(self.runtime.channel_state(input_hop).active.duration_s,
+                               self.runtime.transfer_duration_s(input_hop, 1000.))
+        self.runtime.advance_to_decision()
+        self.runtime.submit_placements({child: PlacementDecision(self.bs)})
         edge_hop = DirectedChannelKey(self.member, self.bs)
-        edge_transfer_id = child.predecessor_records[parent.key].transfer_ids[0]
-        edge_job = self.runtime.channel_state(edge_hop)._jobs[edge_transfer_id]
+        transfer_id = self.runtime.trace(child).predecessor_records[parent].transfer_ids[0]
+        self.assertAlmostEqual(self.runtime.transfer_jobs[transfer_id].duration_s,
+                               self.runtime.transfer_duration_s(edge_hop, 1000.))
 
-        self.assertEqual(parent.input_bits, 1000.0)
-        self.assertAlmostEqual(
-            self.runtime.channel_state(input_hop).active.duration_s,
-            self.runtime.transfer_duration_s(input_hop, 1000.0),
-        )
-        self.assertAlmostEqual(
-            edge_job.duration_s,
-            self.runtime.transfer_duration_s(edge_hop, 1000.0),
-        )
-
-    def test_relayed_inputs_and_local_predecessor_enable_fifo_computation(self):
-        keys = self.runtime.submit_dag(
-            dag_id=7,
-            dag=self.dag,
-            owner_member=self.member,
-            ground_device=self.ground,
-            placements={
-                0: PlacementDecision(self.bs, priority_seq=0),
-                1: PlacementDecision(self.bs, priority_seq=1),
-            },
-            epoch_start=0.0,
-        )
-
-        self.assertIsNotNone(
-            self.runtime.channel_state(DirectedChannelKey(self.ground, self.member)).active
-        )
-        self.runtime.advance_until(self.runtime.deadline)
-        parent = self.runtime.trace(keys[0])
-        child = self.runtime.trace(keys[1])
-
+    def test_relayed_inputs_and_local_predecessor_enable_computation(self):
+        keys = self.register()
+        run_online_schedule(self.runtime, {self.member: keys}, lambda key: PlacementDecision(self.bs))
+        parent, child = (self.runtime.trace(key) for key in keys)
         self.assertEqual(len(parent.input_record.transfer_ids), 2)
-        self.assertIsNotNone(parent.input_record.finish_at)
-        self.assertEqual(child.predecessor_arrival_at[keys[0]], parent.compute_finish_at)
-        self.assertGreaterEqual(parent.compute_start_at, parent.data_ready_at)
-        self.assertGreaterEqual(child.compute_start_at, child.data_ready_at)
-        self.assertEqual(parent.status.value, "finished")
-        self.assertEqual(child.status.value, "finished")
+        self.assertEqual(child.predecessor_arrival_at[parent.key], child.decision_at)
+        self.assertEqual(child.decision_at, parent.compute_finish_at)
+        for task in (parent, child):
+            self.assertGreaterEqual(task.compute_start_at, task.data_ready_at)
+            self.assertEqual(task.status.value, 'finished')
 
     def test_active_transfer_remains_active_before_its_finish_time(self):
-        """当前时隙内推进到传输中途时，不应提前完成活动传输。"""
-        self.runtime.submit_dag(
-            dag_id=8,
-            dag=self.dag,
-            owner_member=self.member,
-            ground_device=self.ground,
-            placements={
-                0: PlacementDecision(self.member, priority_seq=0),
-                1: PlacementDecision(self.member, priority_seq=1),
-            },
-            epoch_start=0.0,
-        )
-        key = DirectedChannelKey(self.ground, self.member)
-        active = self.runtime.channel_state(key).active
-        active_id = active.transfer_id
+        keys = self.register()
+        self.runtime.submit_placements({keys[0]: PlacementDecision(self.member)})
+        channel = self.runtime.channel_state(DirectedChannelKey(self.ground, self.member))
+        active = channel.active
+        self.runtime.advance_until(active.finish_at / 2.)
+        self.assertIs(channel.active, active)
+        self.assertIsNone(self.runtime.trace(keys[1]).input_record)
 
-        self.runtime.advance_until(active.finish_at / 2.0)
-
-        self.assertEqual(self.runtime.channel_state(key).active.transfer_id, active_id)
-
-    def test_queued_transfer_keeps_the_post_flight_topology_duration(self):
-        post_flight_position = np.array([80.0, 0.0, 10.0])
-        self.runtime.update_entity_positions({self.member: post_flight_position})
-        self.runtime.submit_dag(
-            dag_id=9,
-            dag=self.dag,
-            owner_member=self.member,
-            ground_device=self.ground,
-            placements={
-                0: PlacementDecision(self.member, priority_seq=0),
-                1: PlacementDecision(self.member, priority_seq=1),
-            },
-            epoch_start=0.0,
-        )
-        key = DirectedChannelKey(self.ground, self.member)
-        first = self.runtime.channel_state(key).active
-        self.runtime.advance_until(first.finish_at / 2.0)
-
-        self.runtime.advance_until(first.finish_at)
-
-        second = self.runtime.channel_state(key).active
-        expected_duration = self.runtime.channel_model.transmission_delay_s(
-            data_size_bits=1000.0,
-            transmitter=self.runtime.entity_positions[self.ground],
-            receiver=post_flight_position,
-            transmit_power_w=1.0,
-            link_type="ground_to_air",
-            bandwidth_hz=1e9,
-        )
-        self.assertAlmostEqual(second.duration_s, expected_duration)
+    def test_each_decision_uses_post_flight_topology_snapshot(self):
+        position = np.array([80., 0., 10.])
+        self.runtime.update_entity_positions({self.member: position})
+        keys = self.register()
+        run_online_schedule(self.runtime, {self.member: keys}, lambda key: PlacementDecision(self.member))
+        hop = DirectedChannelKey(self.ground, self.member)
+        expected = self.runtime.transfer_duration_s(hop, 1000.)
+        for key in keys:
+            record = self.runtime.trace(key).input_record
+            self.assertAlmostEqual(record.finish_at - record.start_at, expected)
 
     def test_all_local_dag_finishes_without_transfers_or_compute_energy(self):
-        keys = self.runtime.submit_dag(
-            dag_id=12,
-            dag=self.dag,
-            owner_member=self.member,
-            ground_device=self.ground,
-            placements={
-                0: PlacementDecision(self.ground, priority_seq=0),
-                1: PlacementDecision(self.ground, priority_seq=1),
-            },
-            epoch_start=0.0,
-        )
-
-        self.runtime.advance_until(1.0)
-
-        self.assertEqual(self.runtime.channels, {})
+        keys = self.register()
+        run_online_schedule(self.runtime, {self.member: keys}, lambda key: PlacementDecision(self.ground))
+        self.assertFalse(self.runtime.channels)
         for key in keys:
             task = self.runtime.trace(key)
-            self.assertEqual(task.status.value, "finished")
+            self.assertEqual(task.status.value, 'finished')
             self.assertEqual(task.input_record.transfer_ids, ())
-            self.assertEqual(task.input_record.start_at, 0.0)
-            self.assertEqual(task.input_record.finish_at, 0.0)
-            self.assertEqual(task.compute_energy_j, 0.0)
+            self.assertEqual(task.input_record.start_at, task.decision_at)
+            self.assertEqual(task.input_record.finish_at, task.decision_at)
+            self.assertEqual(task.compute_energy_j, 0.)
 
     def test_bs_result_returns_to_local_child_through_owner_member(self):
-        keys = self.runtime.submit_dag(
-            dag_id=13,
-            dag=self.dag,
-            owner_member=self.member,
-            ground_device=self.ground,
-            placements={
-                0: PlacementDecision(self.bs, priority_seq=0),
-                1: PlacementDecision(self.ground, priority_seq=1),
-            },
-            epoch_start=0.0,
-        )
-
-        channel_keys = set(self.runtime.channels)
-        self.runtime.advance_until(self.runtime.deadline)
-
-        parent = self.runtime.trace(keys[0])
-        child = self.runtime.trace(keys[1])
-        self.assertEqual(parent.status.value, "finished")
-        self.assertEqual(child.status.value, "finished")
-        self.assertEqual(len(child.predecessor_records[keys[0]].transfer_ids), 2)
-        self.assertIn(DirectedChannelKey(self.bs, self.member), channel_keys)
-        self.assertIn(DirectedChannelKey(self.member, self.ground), channel_keys)
+        keys = self.register()
+        run_online_schedule(self.runtime, {self.member: keys},
+                            lambda key: PlacementDecision(self.bs if key.node_id == 0 else self.ground))
+        parent, child = (self.runtime.trace(key) for key in keys)
+        self.assertEqual(child.status.value, 'finished')
+        self.assertEqual(len(child.predecessor_records[parent.key].transfer_ids), 2)
+        self.assertIn(DirectedChannelKey(self.bs, self.member), self.runtime.channels)
+        self.assertIn(DirectedChannelKey(self.member, self.ground), self.runtime.channels)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+if __name__ == '__main__':
+    unittest.main()

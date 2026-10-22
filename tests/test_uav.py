@@ -210,7 +210,8 @@ class TestMemberUAV(unittest.TestCase):
         from env.workload.dag_generator import DAG
         from env.simulator import Simulator
         from env.contracts import DAGRequest, PlacementDecision
-        from scripts.ers import ERS
+        from methods.random.ers import ERS
+        from methods.scheduling import run_online_schedule
 
         region = Region(rng=RandomStreams().region)
         region.generate()
@@ -237,10 +238,9 @@ class TestMemberUAV(unittest.TestCase):
             EntityRef(EntityKind.MEMBER_UAV, int(environment.user_member_ids[user_id])),
             EntityRef(EntityKind.GROUND_DEVICE, user_id)) for user_id in range(count)]
         plan = ERS(runtime).plan(requests)
-        runtime.submit_dags(requests, {
-            key: PlacementDecision(EntityRef(EntityKind.GROUND_DEVICE, key.user_id), seq)
-            for seq, key in enumerate(plan.order)
-        }, runtime.now)
+        runtime.register_dags(requests)
+        run_online_schedule(runtime, plan.member_orders,
+                            lambda key: PlacementDecision(EntityRef(EntityKind.GROUND_DEVICE, key.user_id)))
         result = environment.end_slot()
         self.assertEqual(len(result.finished_dags), count)
         self.assertFalse(result.failed_dags)
