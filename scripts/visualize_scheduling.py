@@ -165,7 +165,8 @@ def build_replay(load_scale=1.0, initial_region=1):
                 display_end = min(job.finish_at, result.slot_end) if job.start_at is not None else None
                 name = f"T{key.node_id} 输入" if parent is None else f"T{parent.node_id} → T{key.node_id} 结果"
                 source, target = entity_id(channel.source), entity_id(channel.target)
-                energy = (display_end - job.start_at) * runtime.transmit_powers[channel.source] if display_end is not None else 0.0
+                energy = ((display_end - job.start_at) * runtime.transmit_powers[channel.source]
+                          if display_end is not None and channel.source.kind is EntityKind.MEMBER_UAV else 0.0)
                 transfers.append(dict(id=transfer_id, task=tid, region=region_id,
                                       kind="input" if parent is None else "result", label=name,
                                       predecessor=task_id(parent) if parent is not None else None,

@@ -52,11 +52,10 @@ class TaskRuntime:
         self.predecessor_arrival_at[predecessor] = float(at)
         return self._update_data_ready()
 
-    def mark_compute_started(self, core_id: int, at: float, energy_j: float) -> None:
+    def mark_compute_started(self, core_id: int, at: float) -> None:
         self.status = TaskStatus.RUNNING
         self.execution_core_id = core_id
         self.compute_start_at = float(at)
-        self.compute_energy_j = float(energy_j)
 
     def mark_compute_finished(self, at: float) -> None:
         self.status = TaskStatus.FINISHED

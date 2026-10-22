@@ -175,11 +175,11 @@ class TestMemberUAV(unittest.TestCase):
             members.core_frequencies[members.bs_index], np.full(4, 12e9)
         )
 
-    def test_energy_virtual_queue_includes_bs_at_shared_index(self):
+    def test_energy_virtual_queue_only_includes_members(self):
         members = self._generate_members()
 
-        self.assertEqual(len(members.energy_virtual_queue_j), members.num_uavs)
-        self.assertEqual(members.energy_virtual_queue_j[members.bs_index], 0.0)
+        self.assertEqual(members.energy_virtual_queue_j.shape, (members.member_uav_count,))
+        np.testing.assert_array_equal(members.energy_virtual_queue_j, 0.)
 
     def test_initial_positions_do_not_depend_on_user_coordinates(self):
         """用户坐标改变但区域人数不变时，Member 初始位置应完全一致。"""

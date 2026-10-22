@@ -2,8 +2,9 @@
 
 from collections import deque
 from dataclasses import dataclass, field
+import heapq
 
-from env.types import EntityRef, TaskKey
+from env.types import EntityKind, EntityRef, TaskKey
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,35 @@ class ServerState:
     def enqueue(self, task_key: TaskKey, cpu_cycles: float, ready_at: float) -> None:
         self.queue.append(_QueuedCompute(task_key, float(cpu_cycles), float(ready_at)))
 
+    def compute_wait(self, now: float) -> float:
+        """返回此刻就绪的新任务需要等待的秒数，不修改队列或核心状态。
+
+        调用方已处理 now 时刻的事件；只推算运行中及公共就绪队列的负载，
+        不计等待数据的任务和未来到达。核心同时空闲时沿用编号顺序。
+        """
+        if not self.queue:
+            if len(self.running) < len(self.core_frequencies):
+                return 0.0
+            return max(0.0, min(record.finish_at for record in self.running.values()) - now)
+
+        available = [
+            (self.running[core_id].finish_at if core_id in self.running else now, core_id)
+            for core_id in range(len(self.core_frequencies))
+        ]
+        heapq.heapify(available)
+        idle = []
+        for item in self.queue:
+            if not idle:
+                start_at = available[0][0]
+                while available and available[0][0] == start_at:
+                    idle.append(heapq.heappop(available)[1])
+                idle.reverse()
+            # 同一批空闲核心先全部派发，再处理零时长任务的完成事件。
+            core_id = idle.pop()
+            finish_at = start_at + item.cpu_cycles / self.core_frequencies[core_id]
+            heapq.heappush(available, (finish_at, core_id))
+        return (start_at if idle else available[0][0]) - now
+
     def dispatch(self, now: float) -> tuple[ComputeRecord, ...]:
         idle = [core_id for core_id in range(len(self.core_frequencies)) if core_id not in self.running]
         started: list[ComputeRecord] = []
@@ -48,7 +78,8 @@ class ServerState:
             core_id = idle.pop(0)
             frequency = self.core_frequencies[core_id]
             finish_at = now + item.cpu_cycles / frequency
-            energy_j = self.capacitance_factor * item.cpu_cycles * frequency**2
+            energy_j = (self.capacitance_factor * item.cpu_cycles * frequency**2
+                        if self.node.kind is EntityKind.MEMBER_UAV else 0.0)
             record = ComputeRecord(item.task_key, core_id, now, finish_at, energy_j)
             self.running[core_id] = record
             started.append(record)
