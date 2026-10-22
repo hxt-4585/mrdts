@@ -22,7 +22,7 @@
 
 | 位置 | 内容 |
 |---|---|
-| `env/simulator.py` | `begin_slot/end_slot`、飞行、拓扑刷新、用户关联和时隙运行时管理 |
+| `env/env.py` | `MRDTSEnv` 的场景生成、重置、`begin_step/submit_schedule/end_step`、观测与能耗结算 |
 | `env/types.py`、`env/contracts.py` | 实体与任务标识、DAG 请求及放置决策 |
 | `env/entities/` | 区域、用户、UAV 与基站的状态及资源 |
 | `env/workload/` | DAG 拓扑、计算量和数据量生成 |

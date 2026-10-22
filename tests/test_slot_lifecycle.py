@@ -6,39 +6,32 @@ from unittest.mock import patch
 
 import numpy as np
 
-from scripts.randomness import RandomStreams
-from env.communication.channel_model import ChannelModel
 from env.contracts import DAGRequest, PlacementDecision
-from env.entities.region import Region
-from env.entities.uav import MasterUAV, MemberUAV
-from env.entities.user import User
-from env.simulator import Simulator
+from env.env import MRDTSEnv
+from tests import test_mrdts_env
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
 
 
 class TestSlotLifecycle(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.region = Region(rng=RandomStreams().region)
-        cls.region.generate()
-
     def setUp(self):
-        self.users = User(rng=RandomStreams().user)
-        self.users.generate_from_region(self.region)
-        masters = MasterUAV()
-        masters.generate_from_region(self.region)
-        self.members = MemberUAV()
-        self.members.generate_from_region_and_user(self.region, self.users, masters)
-        self.environment = Simulator(self.members, ChannelModel(), 0.1)
+        self.environment = MRDTSEnv(test_mrdts_env.TestMRDTSEnv.settings())
+        self.environment.generate_scene()
+        self.environment.reset(epoch_index=0)
+        self.region, self.users, self.members = self.environment.region, self.environment.users, self.environment.members
+        # 本组测试手工构造负载，以分别验证截止和资源隔离。
+        workload = patch.object(self.environment, "_generate_dag_requests", return_value=())
+        workload.start()
+        self.addCleanup(workload.stop)
         self.actions = np.zeros((self.members.member_uav_count, 2))
         self.ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
-        self.assertTrue(callable(getattr(self.environment, "begin_slot", None)),
-                        "Simulator 必须提供正式 begin_slot 生命周期接口")
+
+    def _member_ids(self, region_id):
+        return np.flatnonzero(self.members.region_ids[:self.members.member_uav_count] == region_id)
 
     def _begin(self):
-        self.environment.begin_slot(self.region, self.users.positions, self.actions)
-        return self.environment.runtime
+        self.environment.begin_step(self.actions)
+        return self.environment._runtime
 
     def _submit(self, runtime, dag_id=0, cycles=1e7, input_kbit=1.0, execution=None):
         owner = runtime.ground_owner_members[self.ground]
@@ -52,7 +45,7 @@ class TestSlotLifecycle(unittest.TestCase):
         grid = self.region.region_map
         row, column = np.argwhere(grid[:, :-1] != grid[:, 1:])[0]
         source, target = int(grid[row, column]), int(grid[row, column + 1])
-        member_id = int(self.environment.member_ids_in_region(source)[0])
+        member_id = int(self._member_ids(source)[0])
         self.assertGreater(self.members.region_member_counts[source - 1], 1)
         cell_size = self.region.config.cell_size
         self.members.positions[member_id, :2] = (
@@ -74,48 +67,53 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertEqual(self.members.region_ids[member_id], target)
         np.testing.assert_array_equal(self.members.region_member_counts, expected)
         self.assertEqual(self.members.region_member_counts.sum(), self.members.member_uav_count)
-        self.environment.end_slot()
+        self.environment.end_step().slot_result
 
         self.actions *= -1
         self._begin()
         self.assertEqual(self.members.region_ids[member_id], source)
         np.testing.assert_array_equal(self.members.region_member_counts, initial_counts)
-        self.environment.end_slot()
+        self.environment.end_step().slot_result
 
     def test_refresh_keeps_zero_count_for_empty_last_region(self):
         last_region = self.region.config.region_count
-        departing = self.environment.member_ids_in_region(last_region)
-        destination = self.environment.member_ids_in_region(1)[0]
+        departing = self._member_ids(last_region)
+        destination = self._member_ids(1)[0]
         self.members.positions[departing] = self.members.positions[destination]
         expected = self.members.region_member_counts.copy()
         expected[0] += expected[-1]
         expected[-1] = 0
-        users = self.users.positions[self.users.region_ids != last_region]
+        keep = self.users.region_ids != last_region
+        self.users.positions = self.users.positions[keep]
+        self.users.region_ids = self.users.region_ids[keep]
+        self.users.region_user_counts[-1] = 0
 
-        self.environment.refresh_slot_topology(self.region, users)
+        self.environment._refresh_topology()
 
         np.testing.assert_array_equal(self.members.region_member_counts, expected)
         self.assertEqual(self.members.region_member_counts.sum(), self.members.member_uav_count)
 
     def test_begin_refreshes_topology_before_creating_runtime(self):
-        original_create = self.environment.create_scheduling_runtime
+        original_create = self.environment._create_scheduling_runtime
 
-        def check_topology(positions, associations, **kwargs):
+        def check_topology():
+            positions = self.users.positions
+            associations = self.environment.user_member_ids
             for user_id, member_id in enumerate(associations):
                 self.assertEqual(self.members.region_ids[member_id], self.users.region_ids[user_id])
-                candidates = self.environment.member_ids_in_region(self.users.region_ids[user_id])
+                candidates = self._member_ids(self.users.region_ids[user_id])
                 distances = np.linalg.norm(self.members.positions[candidates, :2] - positions[user_id, :2], axis=1)
                 self.assertEqual(member_id, candidates[np.argmin(distances)])
-            return original_create(positions, associations, **kwargs)
+            return original_create()
 
         # 令区域编号过期，只有先刷新物理拓扑，工厂入口处的检查才会通过。
         self.members.region_ids[:self.members.bs_index] = 1
-        with patch.object(self.environment, "create_scheduling_runtime", side_effect=check_topology):
-            violations = self.environment.begin_slot(self.region, self.users.positions, self.actions)
+        with patch.object(self.environment, "_create_scheduling_runtime", side_effect=check_topology):
+            violations = self.environment.begin_step(self.actions).flight_violations
         self.assertEqual(violations.dtype, np.bool_)
         self.assertEqual(violations.shape, (self.members.member_uav_count,))
-        self.assertEqual(self.environment.runtime.slot_start, 0.0)
-        self.assertEqual(self.environment.runtime.deadline, 1.0)
+        self.assertEqual(self.environment._runtime.slot_start, 0.0)
+        self.assertEqual(self.environment._runtime.deadline, 1.0)
 
     def test_end_marks_unfinished_work_failed_and_next_slot_is_empty(self):
         runtime = self._begin()
@@ -127,8 +125,8 @@ class TestSlotLifecycle(unittest.TestCase):
         runtime.advance_until(0.5)
         self.assertTrue(runtime.servers[self.ground].running)
         self.assertTrue(all(runtime.trace(key).status.value == 'unscheduled' for key in keys[1:]))
-        result = self.environment.end_slot()
-        self.assertIsNone(self.environment.runtime)
+        result = self.environment.end_step().slot_result
+        self.assertIsNone(self.environment._runtime)
         self.assertTrue(runtime.closed)
         self.assertEqual(result.failed_dags, ((owner.index, 0, 0),))
         self.assertEqual(result.finished_dags, ())
@@ -148,7 +146,7 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertFalse(new_runtime.dag_runtimes)
         key = self._submit(new_runtime)
         self.assertEqual(new_runtime.trace(key).decision_at, 1.)
-        next_result = self.environment.end_slot()
+        next_result = self.environment.end_step().slot_result
         self.assertEqual(new_runtime.trace(key).compute_start_at, 1.0)
         self.assertAlmostEqual(new_runtime.trace(key).compute_finish_at, 1.01)
         self.assertEqual(len(next_result.finished_dags), 1)
@@ -160,7 +158,7 @@ class TestSlotLifecycle(unittest.TestCase):
         owner = runtime.ground_owner_members[self.ground]
         waiting = runtime.register_dags([DAGRequest(
             1, DAG(1, [], np.array([[0., 1e7]]), {}), owner, self.ground)])[0]
-        result = self.environment.end_slot()
+        result = self.environment.end_step().slot_result
         self.assertEqual(runtime.trace(finished).compute_finish_at, 1.0)
         self.assertIsNone(runtime.trace(waiting).compute_start_at)
         self.assertEqual(len(result.finished_dags), 1)
@@ -171,8 +169,8 @@ class TestSlotLifecycle(unittest.TestCase):
         runtime.advance_until(runtime.deadline)
         self.assertTrue(runtime.closed)
         result = runtime.finish_slot()
-        self.assertIs(self.environment.end_slot(), result)
-        self.assertIsNone(self.environment.runtime)
+        self.assertIs(self.environment.end_step().slot_result, result)
+        self.assertIsNone(self.environment._runtime)
 
     def test_partial_computation_energy_stops_at_deadline(self):
         runtime = self._begin()
@@ -183,7 +181,7 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertEqual(task.status.value, "running")
         frequency = runtime.servers[member].core_frequencies[task.execution_core_id]
         expected = runtime.servers[member].capacitance_factor * frequency**3 * (1.0 - task.compute_start_at)
-        result = self.environment.end_slot()
+        result = self.environment.end_step().slot_result
         self.assertAlmostEqual(task.compute_energy_j, expected)
         self.assertAlmostEqual(result.compute_energy_j, expected)
         self.assertIsNone(task.compute_finish_at)
@@ -200,13 +198,12 @@ class TestSlotLifecycle(unittest.TestCase):
         from env.settings import EnvConfig
 
         self.assertEqual(EnvConfig.default().scheduling_duration_s, 1.0)
-        self.environment = Simulator(self.members, ChannelModel(), 0.1,
-                                       env_config=replace(EnvConfig.default(), scheduling_duration_s=0.25))
+        self.environment.env_config = replace(EnvConfig.default(), scheduling_duration_s=0.25)
         self.assertEqual(self._begin().deadline, 0.25)
-        first = self.environment.end_slot()
+        first = self.environment.end_step().slot_result
         self.assertEqual(first.slot_start, 0.0)
         self.assertEqual(self._begin().deadline, 0.5)
-        self.environment.end_slot()
+        self.environment.end_step().slot_result
 
 
 if __name__ == "__main__":

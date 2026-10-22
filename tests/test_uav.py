@@ -205,43 +205,36 @@ class TestMemberUAV(unittest.TestCase):
 
     def test_one_user_three_members_can_run_ers_after_zero_flight(self):
         """回归：每区域 1 用户、3 Member 不重合，ERS 后可正常本地执行。"""
-        from env.communication.channel_model import ChannelModel
+        from unittest.mock import patch
+        from env.env import MRDTSEnv
         from env.types import EntityKind, EntityRef
         from env.workload.dag_generator import DAG
-        from env.simulator import Simulator
-        from env.contracts import DAGRequest, PlacementDecision
+        from env.contracts import PlacementDecision
         from methods.random.ers import ERS
-        from methods.scheduling import run_online_schedule
+        from tests import test_mrdts_env
 
-        region = Region(rng=RandomStreams().region)
-        region.generate()
-        count = region.config.region_count
-        users = User(replace(UserConfig.default(), total_users=count, min_users_per_region=1,
-                             area_fluctuation=0.), rng=RandomStreams().user)
-        users.generate_from_region(region)
-        config = replace(UAVConfig.default(), master_uav_count=count,
-                         member_uav_count=3 * count)
-        masters = MasterUAV(config)
-        masters.generate_from_region(region)
-        members = MemberUAV(config)
-        members.generate_from_region_and_user(region, users, masters)
+        settings = test_mrdts_env.TestMRDTSEnv.settings()
+        count = settings['region'].region_count
+        settings['user'] = replace(settings['user'], total_users=count, min_users_per_region=1, area_fluctuation=0.)
+        settings['uav'] = replace(settings['uav'], master_uav_count=count, member_uav_count=3 * count)
+        environment = MRDTSEnv(settings)
+        environment.generate_scene()
+        environment.reset(epoch_index=0)
+        members = environment.members
         xy = members.positions[:members.bs_index, :2]
         distances = np.linalg.norm(xy[:, None, :] - xy[None, :, :], axis=2)
-        self.assertGreaterEqual(distances[np.triu_indices(len(xy), 1)].min(), region.config.cell_size)
-
-        environment = Simulator(members, ChannelModel(), users.config.transmit_power,
-                                  users.config.core_frequency)
-        environment.begin_slot(region, users.positions, np.zeros((members.member_uav_count, 2)))
-        runtime = environment.runtime
-        requests = [DAGRequest(
-            0, DAG(2, [(0, 1)], np.array([[1., 1e7], [1., 1e7]]), {(0, 1): 1.}),
-            EntityRef(EntityKind.MEMBER_UAV, int(environment.user_member_ids[user_id])),
-            EntityRef(EntityKind.GROUND_DEVICE, user_id)) for user_id in range(count)]
-        plan = ERS(runtime).plan(requests)
-        runtime.register_dags(requests)
-        run_online_schedule(runtime, plan.member_orders,
-                            lambda key: PlacementDecision(EntityRef(EntityKind.GROUND_DEVICE, key.user_id)))
-        result = environment.end_slot()
+        self.assertGreaterEqual(distances[np.triu_indices(len(xy), 1)].min(), environment.region.config.cell_size)
+        dag = DAG(2, [(0, 1)], np.array([[1., 1e7], [1., 1e7]]), {(0, 1): 1.})
+        with patch.object(environment.dag_generator, 'generate_single_dag', return_value=dag):
+            begin = environment.begin_step(np.zeros((members.member_uav_count, 2)))
+        plan = ERS(environment._runtime).plan(begin.requests)
+        orders = {member.index: iter(order) for member, order in plan.member_orders.items()}
+        ready = begin.ready_member_ids
+        while ready:
+            keys = [next(orders[member_id]) for member_id in ready]
+            ready = environment.submit_schedule({key: PlacementDecision(EntityRef(EntityKind.GROUND_DEVICE, key.user_id))
+                                                 for key in keys})
+        result = environment.end_step().slot_result
         self.assertEqual(len(result.finished_dags), count)
         self.assertFalse(result.failed_dags)
 

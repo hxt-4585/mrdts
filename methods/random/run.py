@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import platform
-import random
 import subprocess
 import sys
 import tomllib
@@ -19,29 +18,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if __package__ in (None, ''):
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from env.communication.channel_model import ChannelModel
-from env.contracts import DAGRequest, PlacementDecision
-from env.entities.region import Region
-from env.entities.uav import MasterUAV, MemberUAV
-from env.entities.user import User
+from env.contracts import PlacementDecision
+from env.env import MRDTSEnv
 from env.settings import ChannelConfig, DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
-from env.simulator import Simulator
-from env.types import EntityKind, EntityRef
-from env.workload.dag_generator import DAGGenerator
 from methods.random.ers import ERS
-from methods.scheduling import run_online_schedule
 
 
 class RandomStreams:
-    """沿用旧种子派生：空间跨回合固定，DAG、飞行和调度互不干扰。"""
+    """方法侧仅管理飞行与调度随机流；场景和 DAG 由环境按相同种子派生。"""
 
     def __init__(self, seed=42, episode=0):
-        spatial = np.random.SeedSequence([seed, 0]).generate_state(2)
-        workload = int(np.random.SeedSequence([seed, episode]).generate_state(3)[2])
-        self.region = np.random.default_rng(int(spatial[0]))
-        self.user = np.random.default_rng(int(spatial[1]))
-        self.dag = np.random.default_rng(workload)
-        self.dag_python = random.Random(workload)
+        self.seed = seed
+        self.episode = episode
         self.flight = np.random.default_rng(np.random.SeedSequence([seed, episode, 101]))
         self.scheduling = np.random.default_rng(np.random.SeedSequence([seed, episode, 102]))
 
@@ -58,42 +46,31 @@ def resolved_settings(users=None, dag_nodes=None):
 
 
 def build_scene(settings, streams):
-    region = Region(settings['region'], rng=streams.region)
-    region.generate()
-    users = User(settings['user'], rng=streams.user)
-    users.generate_from_region(region)
-    masters = MasterUAV(settings['uav'])
-    masters.generate_from_region(region)
-    members = MemberUAV(settings['uav'], settings['env'])
-    members.generate_from_region_and_user(region, users, masters)
-    simulator = Simulator(members, ChannelModel(settings['channel']), users.config.transmit_power,
-                          users.config.core_frequency, settings['env'])
-    generator = DAGGenerator(settings['dag'], rng=streams.dag, py_rng=streams.dag_python)
-    return region, users, simulator, generator
+    settings = {**settings, 'env': replace(settings['env'], env_seed=streams.seed)}
+    environment = MRDTSEnv(settings)
+    environment.generate_scene()
+    environment.reset(epoch_index=streams.episode)
+    return environment
 
 
-def run_slot(scene, streams, slot):
-    region, users, simulator, generator = scene
+def run_slot(environment, streams):
     # Master 固定；为每架 Member 独立采样两个水平动作分量。
-    actions = streams.flight.uniform(-1., 1., (simulator.members.member_uav_count, 2))
-    violations = simulator.begin_slot(region, users.positions, actions)
-    runtime = simulator.runtime
-    requests = tuple(DAGRequest(
-        slot * users.num_users + user_id, generator.generate_single_dag(),
-        EntityRef(EntityKind.MEMBER_UAV, int(simulator.user_member_ids[user_id])),
-        EntityRef(EntityKind.GROUND_DEVICE, user_id),
-    ) for user_id in range(users.num_users))
-    plan = ERS(runtime).plan(requests)
-    runtime.register_dags(requests)
+    actions = streams.flight.uniform(-1., 1., (environment.members.member_uav_count, 2))
+    begin = environment.begin_step(actions)
+    runtime = environment._runtime
+    plan = ERS(runtime).plan(begin.requests)
     candidates = {request.key: runtime.candidate_execution_nodes(
-        request.owner_member, request.ground_device) for request in requests}
-
-    def choose_placement(key):
-        nodes = candidates[key.owner_member_id, key.user_id, key.dag_id]
-        return PlacementDecision(nodes[int(streams.scheduling.integers(len(nodes)))])
-
-    run_online_schedule(runtime, plan.member_orders, choose_placement)
-    return simulator.end_slot(), int(np.count_nonzero(violations))
+        request.owner_member, request.ground_device) for request in begin.requests}
+    orders = {member.index: iter(order) for member, order in plan.member_orders.items()}
+    ready = begin.ready_member_ids
+    while ready:
+        placements = {}
+        for member_id in ready:
+            key = next(orders[member_id])
+            nodes = candidates[key.owner_member_id, key.user_id, key.dag_id]
+            placements[key] = PlacementDecision(nodes[int(streams.scheduling.integers(len(nodes)))])
+        ready = environment.submit_schedule(placements)
+    return environment.end_step().slot_result, int(np.count_nonzero(begin.flight_violations))
 
 
 def slot_metrics(result, episode, slot, flight_violations):
@@ -138,6 +115,7 @@ def git_output(*args):
 
 def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='results'):
     settings = resolved_settings(users, dag_nodes)
+    settings['env'] = replace(settings['env'], env_seed=seed)
     steps_per_epoch = settings['env'].steps_per_epoch
     output_root = Path(output_root)
     if not output_root.is_absolute():
@@ -170,7 +148,7 @@ def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='re
                 # 同一空间随机流重建场景：区域、用户固定，UAV 回到初始位置。
                 scene = build_scene(settings, streams)
                 for slot in range(steps_per_epoch):
-                    result, violations = run_slot(scene, streams, slot)
+                    result, violations = run_slot(scene, streams)
                     row = slot_metrics(result, episode, slot, violations)
                     rows.append(row)
                     if metrics_writer is None:

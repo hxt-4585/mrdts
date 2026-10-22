@@ -24,15 +24,10 @@ class TestEnvStructure(unittest.TestCase):
                     self.fail(f"缺少分类后的模块 {module}")
                 self.assertEqual(loaded.__name__, module)
 
-    def test_simulator_exposes_existing_slot_lifecycle(self):
-        try:
-            module = importlib.import_module("env.simulator")
-        except ModuleNotFoundError:
-            self.fail("现有仿真编排应迁入 env.simulator")
-        self.assertEqual(module.Simulator.__module__, "env.simulator")
-        for method in ("begin_slot", "end_slot", "refresh_slot_topology",
-                       "create_scheduling_runtime"):
-            self.assertTrue(callable(getattr(module.Simulator, method)))
+    def test_environment_exposes_step_lifecycle(self):
+        module = importlib.import_module("env.env")
+        for method in ("generate_scene", "reset", "begin_step", "submit_schedule", "end_step"):
+            self.assertTrue(callable(getattr(module.MRDTSEnv, method)))
 
     def test_shared_identifiers_have_one_definition(self):
         try:

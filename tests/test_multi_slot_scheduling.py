@@ -1,17 +1,15 @@
 """十个时隙的随机飞行与随机卸载集成测试。"""
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from scripts.randomness import RandomStreams
-from env.communication.channel_model import ChannelModel
 from env.contracts import DAGRequest, PlacementDecision
-from env.entities.region import Region
-from env.entities.uav import MasterUAV, MemberUAV
-from env.entities.user import User
 from env.runtime.task_runtime import TaskStatus
-from env.simulator import Simulator
+from env.env import MRDTSEnv
+from tests import test_mrdts_env
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
 from methods.random.ers import ERS
@@ -25,20 +23,10 @@ class TestMultiSlotScheduling(unittest.TestCase):
     DAGS_PER_SLOT = 2
 
     def setUp(self):
-        self.region = Region(rng=RandomStreams().region)
-        self.region.generate()
-        self.users = User(rng=RandomStreams().user)
-        self.users.generate_from_region(self.region)
-        masters = MasterUAV()
-        masters.generate_from_region(self.region)
-        self.members = MemberUAV()
-        self.members.generate_from_region_and_user(self.region, self.users, masters)
-        self.environment = Simulator(
-            self.members,
-            ChannelModel(),
-            user_transmit_power=self.users.config.transmit_power,
-            user_core_frequency=self.users.config.core_frequency,
-        )
+        self.environment = MRDTSEnv(test_mrdts_env.TestMRDTSEnv.settings())
+        self.environment.generate_scene()
+        self.environment.reset(epoch_index=0)
+        self.region, self.users, self.members = self.environment.region, self.environment.users, self.environment.members
         self.max_duration_s = self.environment.env_config.scheduling_duration_s
         self.rng = RandomStreams().scheduling
 
@@ -69,11 +57,11 @@ class TestMultiSlotScheduling(unittest.TestCase):
                                      self.runtime.trace(previous).compute_finish_at)
 
             slot_end = slot_start + self.max_duration_s
-            result = self.environment.end_slot()
+            result = self.environment.end_step().slot_result
             self.assertEqual(result.slot_end, slot_end)
             self.assertEqual(len(result.finished_dags), self.DAGS_PER_SLOT)
             self.assertFalse(result.failed_dags)
-            self.assertIsNone(self.environment.runtime)
+            self.assertIsNone(self.environment._runtime)
             self.assertTrue(self.runtime.closed)
             for task_key in slot_task_keys:
                 task = self.runtime.trace(task_key)
@@ -110,7 +98,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.assertFalse(previous_runtime.servers[ground].queue)
         self.assertTrue(all(previous_runtime.trace(key).status is TaskStatus.UNSCHEDULED for key in keys[1:]))
 
-        result = self.environment.end_slot()
+        result = self.environment.end_step().slot_result
         self.assertEqual(result.failed_dags, ((owner.index, ground.index, 0),))
         self.assertTrue(previous_runtime.closed)
         self.assertTrue(all(task.status is TaskStatus.FAILED for task in previous_runtime.tasks.values()))
@@ -123,7 +111,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
                              EntityRef(EntityKind.MEMBER_UAV, int(self.user_member_ids[0])), ground)
         keys = self.runtime.register_dags([request])
         self.runtime.submit_placements({keys[0]: PlacementDecision(ground)})
-        self.environment.end_slot()
+        self.environment.end_step().slot_result
         task = self.runtime.trace(keys[0])
         self.assertEqual(task.status, TaskStatus.FINISHED)
         self.assertEqual(task.compute_start_at, self.max_duration_s)
@@ -134,8 +122,9 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.assertFalse(next(iter(previous_runtime.dag_runtimes.values())).is_finished)
 
     def _start_slot(self, actions):
-        self.environment.begin_slot(self.region, self.users.positions, actions)
-        self.runtime = self.environment.runtime
+        with patch.object(self.environment, "_generate_dag_requests", return_value=()):
+            self.environment.begin_step(actions)
+        self.runtime = self.environment._runtime
         self.user_member_ids = self.environment.user_member_ids.copy()
 
     def _assert_empty_scheduling_state(self):

@@ -14,19 +14,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.randomness import RandomStreams
-from env.communication.channel_model import ChannelModel
-from env.contracts import DAGRequest, PlacementDecision
-from env.entities.region import Region
-from env.entities.uav import MasterUAV, MemberUAV
-from env.entities.user import User
+from env.contracts import PlacementDecision
+from env.env import MRDTSEnv
 from env.runtime.channel_queue import TransferStatus
-from env.settings import UAVConfig, UserConfig
-from env.simulator import Simulator
+from env.settings import ChannelConfig, DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
 from methods.random.ers import ERS
-from methods.scheduling import run_online_schedule
 
 
 def entity_id(entity):
@@ -38,19 +32,32 @@ def task_id(key):
     return f"d{key.dag_id}-t{key.node_id}"
 
 
-def make_scene():
-    region = Region(rng=RandomStreams().region)
-    region.generate()
-    count = region.config.region_count
-    users = User(replace(UserConfig.default(), total_users=count, min_users_per_region=1,
-                         area_fluctuation=0.0), rng=RandomStreams().user)
-    users.generate_from_region(region)
-    config = replace(UAVConfig.default(), master_uav_count=count,
-                     member_uav_count=2 * count)
-    masters = MasterUAV(config)
-    masters.generate_from_region(region)
-    members = MemberUAV(config)
-    members.generate_from_region_and_user(region, users, masters)
+class ReplayDAGGenerator:
+    """回放用的固定菱形 DAG，替换工作负载而不改变环境执行流程。"""
+
+    def __init__(self, load_scale):
+        self.load_scale = load_scale
+
+    def generate_single_dag(self):
+        edges = [(0, 1), (0, 2), (1, 3), (2, 3)]
+        return DAG(4, edges,
+                   np.array([[120, 8e8], [70, 9e7], [100, 16e8], [80, 18e8]]) * self.load_scale,
+                   {edge: size * self.load_scale for edge, size in zip(edges, (35, 60, 40, 55))})
+
+
+def make_scene(load_scale):
+    region_config = RegionConfig.default()
+    count = region_config.region_count
+    config = replace(UAVConfig.default(), master_uav_count=count, member_uav_count=2 * count)
+    environment = MRDTSEnv(dict(
+        region=region_config, uav=config, channel=ChannelConfig.default(),
+        user=replace(UserConfig.default(), total_users=count, min_users_per_region=1, area_fluctuation=0.),
+        env=EnvConfig.default(), dag=DAGConfig.default(),
+    ))
+    environment.generate_scene()
+    environment.reset(epoch_index=0)
+    environment.dag_generator = ReplayDAGGenerator(load_scale)
+    region, users, members = environment.region, environment.users, environment.members
     # 一用户时默认两架 Member 会重合；只在演示初始化中分散到附近区域网格。
     for user_index, region_id in enumerate(users.region_ids):
         indices = np.flatnonzero(members.region_ids[:members.bs_index] == region_id)
@@ -63,17 +70,16 @@ def make_scene():
             selected.append(int(np.argmin(distance)))
         positions = np.column_stack((xy[selected], np.full(2, config.member_altitude)))
         members.update_positions(indices, positions)
-    return region, users, members
+    return environment
 
 
 def build_replay(load_scale=1.0, initial_region=1):
-    """执行 begin_slot → method ERS → 在线决策/事件推进 → end_slot，提取真实回放记录。"""
-    region, users, members = make_scene()
-    environment = Simulator(members, ChannelModel(), users.config.transmit_power,
-                              users.config.core_frequency)
-    violations = environment.begin_slot(region, users.positions,
-                                         np.zeros((members.member_uav_count, 2)))
-    runtime = environment.runtime
+    """执行 begin_step → ERS → submit_schedule → end_step，提取真实回放记录。"""
+    environment = make_scene(load_scale)
+    region, users, members = environment.region, environment.users, environment.members
+    begin = environment.begin_step(np.zeros((members.member_uav_count, 2)))
+    violations = begin.flight_violations
+    runtime = environment._runtime
     entities = []
     for entity, position in runtime.entity_positions.items():
         if entity.kind is EntityKind.GROUND_DEVICE:
@@ -89,19 +95,17 @@ def build_replay(load_scale=1.0, initial_region=1):
                              frequencies_hz=list(runtime.servers[entity].core_frequencies)))
 
     dag_definitions = []
-    requests, execution_nodes = [], {}
-    for user_index, region_id in enumerate(users.region_ids):
+    requests, execution_nodes = begin.requests, {}
+    for request in requests:
+        user_index = request.ground_device.index
+        region_id = users.region_ids[user_index]
         owner_id = int(environment.user_member_ids[user_index])
         owner = EntityRef(EntityKind.MEMBER_UAV, owner_id)
-        peer_id = next(int(i) for i in environment.member_ids_in_region(int(region_id)) if i != owner_id)
+        peer_id = next(int(i) for i in np.flatnonzero(members.region_ids[:members.member_uav_count] == region_id) if i != owner_id)
         ground = EntityRef(EntityKind.GROUND_DEVICE, user_index)
         locations = [owner, ground, EntityRef(EntityKind.MEMBER_UAV, peer_id), runtime.global_bs]
-        edges = [(0, 1), (0, 2), (1, 3), (2, 3)]
-        # 演示专用确定性负载：较长的计算段便于阅读；不覆盖 config/dag.toml。
-        dag = DAG(4, edges, np.array([[120, 8e8], [70, 9e7], [100, 16e8], [80, 18e8]]) * load_scale,
-                  {edge: size * load_scale for edge, size in zip(edges, (35, 60, 40, 55))})
-        request = DAGRequest(user_index, dag, owner, ground)
-        requests.append(request)
+        dag = request.dag
+        edges = dag.edges
         execution_nodes.update({key: locations[key.node_id] for key in request.task_keys})
         dag_definitions.append(dict(id=f"d{user_index}", label=f"DAG {user_index}",
                                     region=int(region_id), ground=entity_id(ground), owner=entity_id(owner),
@@ -109,9 +113,12 @@ def build_replay(load_scale=1.0, initial_region=1):
                                     target=f"d{user_index}-t{b}", kbit=dag.edge_features[(a, b)]) for a, b in edges]))
 
     plan = ERS(runtime).plan(requests)
-    runtime.register_dags(requests)
-    run_online_schedule(runtime, plan.member_orders, lambda key: PlacementDecision(execution_nodes[key]))
-    result = environment.end_slot()
+    orders = {member.index: iter(order) for member, order in plan.member_orders.items()}
+    ready = begin.ready_member_ids
+    while ready:
+        keys = [next(orders[member_id]) for member_id in ready]
+        ready = environment.submit_schedule({key: PlacementDecision(execution_nodes[key]) for key in keys})
+    result = environment.end_step().slot_result
     # 排名仅用于展示 method 的序列，不参与环境的资源排序。
     ers_indices = {key: index for index, key in enumerate(plan.order)}
     request_by_key = {request.key: request for request in requests}
