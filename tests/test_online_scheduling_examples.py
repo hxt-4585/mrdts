@@ -1,11 +1,12 @@
 """三个可手算的 ERS 在线卸载示例；时间单位为秒。
 
-复用测试场景：每跳速率 1 kbit/s，每个核心 10 cycle/s。
+复用测试场景：每跳独占速率 1 kbit/s，并发时均分带宽和发送功率，每个核心 10 cycle/s。
 固定策略只选择执行节点；排序与事件推进使用真实 ERS 和 runtime。
 运行：python -m unittest tests.test_online_scheduling_examples -v
 """
 
 import unittest
+import math
 
 from env.contracts import PlacementDecision
 from methods.random.ers import ERS
@@ -88,13 +89,16 @@ class TestOnlineSchedulingExamples(unittest.TestCase):
         self.assertEqual(plan.member_orders[a], (parent, child))
         self.assert_task_times(runtime.trace(parent), 0., 0., 0., 1.)
         task = runtime.trace(child)
-        self.assert_transfer_times(runtime, task.input_record, ((1., 3.), (4., 6.)))
-        self.assert_transfer_times(runtime, task.predecessor_records[parent], ((1., 4.),))
+        input_first_end = 1. + 4. / math.log2(3.)
+        result_end = input_first_end + 1.
+        input_end = result_end + 2.
+        self.assert_transfer_times(runtime, task.input_record, ((1., input_first_end), (result_end, input_end)))
+        self.assert_transfer_times(runtime, task.predecessor_records[parent], ((1., result_end),))
         second_hop = runtime.transfer_jobs[task.input_record.transfer_ids[1]]
-        self.assertAlmostEqual(second_hop.source_ready_at, 3.)
-        self.assertAlmostEqual(task.input_arrival_at, 6.)
-        self.assertAlmostEqual(task.predecessor_arrival_at[parent], 4.)
-        self.assert_task_times(task, 1., 6., 6., 7.)
+        self.assertAlmostEqual(second_hop.source_ready_at, input_first_end)
+        self.assertAlmostEqual(task.input_arrival_at, input_end)
+        self.assertAlmostEqual(task.predecessor_arrival_at[parent], result_end)
+        self.assert_task_times(task, 1., input_end, input_end, input_end + 1.)
 
     def test_3_same_channel_serializes_while_another_destination_runs_in_parallel(self):
         """3 时刻：A→B 依次传两份结果，A→C 同时传另一份结果。"""
@@ -114,11 +118,11 @@ class TestOnlineSchedulingExamples(unittest.TestCase):
         self.assert_task_times(runtime.trace(p2), 2., 2., 2., 3.)
         self.assert_task_times(runtime.trace(q), 0., 0., 0., 3.)
         task_b, task_c = runtime.trace(target_b), runtime.trace(target_c)
-        self.assert_transfer_times(runtime, task_b.predecessor_records[p1], ((3., 5.),))
-        self.assert_transfer_times(runtime, task_b.predecessor_records[p2], ((5., 8.),))
-        self.assert_transfer_times(runtime, task_c.predecessor_records[q], ((3., 7.),))
-        self.assert_task_times(task_b, 3., 8., 8., 9.)
-        self.assert_task_times(task_c, 3., 7., 7., 8.)
+        self.assert_transfer_times(runtime, task_b.predecessor_records[p1], ((3., 7.),))
+        self.assert_transfer_times(runtime, task_b.predecessor_records[p2], ((7., 12.),))
+        self.assert_transfer_times(runtime, task_c.predecessor_records[q], ((3., 11.),))
+        self.assert_task_times(task_b, 3., 12., 12., 13.)
+        self.assert_task_times(task_c, 3., 11., 11., 12.)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
 
 import unittest
 
+from env.types import DirectedChannelKey
 from env.contracts import DAGRequest, PlacementDecision
 from methods.random.ers import ERS
 from methods.scheduling import run_online_schedule
@@ -71,10 +72,30 @@ class TestERSRuntime(unittest.TestCase):
         self.assertEqual(len(child.input_record.transfer_ids), 2)
         self.assertEqual(len(child.predecessor_records[parent.key].transfer_ids), 2)
         self.assertAlmostEqual(child.decision_at, .1)
-        self.assertAlmostEqual(child.input_arrival_at, .16)
-        self.assertAlmostEqual(child.predecessor_arrival_at[parent.key], .21)
-        self.assertAlmostEqual(child.compute_start_at, .21)
-        self.assertAlmostEqual(plan.costs[request.key].path_seconds_per_bit[ground, bs] * 1e6, .06)
+        model = runtime.channel_model
+        bandwidth = model.config.total_bandwidth_mhz * 1e6
+
+        def rate(source, target, width):
+            return model.calculate_link(
+                runtime.entity_positions[source], runtime.entity_positions[target],
+                runtime.transmit_powers[source],
+                runtime._link_type(DirectedChannelKey(source, target)), width).rate_bps
+
+        bits = 1e6
+        up, down = rate(ground, member, bandwidth), rate(member, bs, bandwidth)
+        shared_up = rate(ground, member, bandwidth / 2)
+        shared_down = rate(member, bs, bandwidth / 2)
+        # 第一份输入上传后，第二份上传和第一份转发竞争全网带宽。
+        overlap = min(bits / shared_up, bits / shared_down)
+        overlap_end = .1 + bits / up + overlap
+        input_end = overlap_end + max(0., bits - shared_down * overlap) / down
+        second_upload_end = overlap_end + max(0., bits - shared_up * overlap) / up
+        result_end = max(input_end, second_upload_end) + bits / down
+        self.assertAlmostEqual(child.input_arrival_at, input_end)
+        self.assertAlmostEqual(child.predecessor_arrival_at[parent.key], result_end)
+        self.assertAlmostEqual(child.compute_start_at, result_end)
+        self.assertAlmostEqual(plan.costs[request.key].path_seconds_per_bit[ground, bs],
+                               1 / up + 1 / down)
 
     def test_zero_payload_keeps_dependencies_without_transfer_jobs(self):
         runtime, ground, member, bs = make_runtime()

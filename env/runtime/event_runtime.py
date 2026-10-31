@@ -13,6 +13,7 @@ from env.communication.routing import RoutePlanner
 from env.contracts import DAGRequest, PlacementDecision
 from env.settings import EnvConfig
 from env.runtime.channel_queue import DirectedChannelState, TransferJob
+from env.runtime.communication_resources import allocate_transfers
 from env.runtime.dag_runtime import DAGRuntime
 from env.runtime.server_queue import ComputeRecord, ServerState
 from env.runtime.slot_result import DAGResult, MemberEnergyResult, SlotResult
@@ -30,7 +31,6 @@ class ServerSpec:
 class _TransferBinding:
     task_key: TaskKey
     record: TransferRecord
-    power_w: float
     next_transfer_id: str | None = None
     predecessor: TaskKey | None = None
     is_input: bool = False
@@ -50,7 +50,6 @@ class SchedulingRuntime:
         entity_positions: Mapping[EntityRef, np.ndarray],
         servers: Mapping[EntityRef, ServerSpec],
         transmit_powers: Mapping[EntityRef, float],
-        directed_bandwidth_hz: Mapping[DirectedChannelKey, float] | None = None,
         member_regions: Mapping[EntityRef, int] | None = None,
         ground_owner_members: Mapping[EntityRef, EntityRef] | None = None,
         *,
@@ -81,7 +80,9 @@ class SchedulingRuntime:
             for entity, spec in servers.items()
         }
         self.transmit_powers = {entity: float(power) for entity, power in transmit_powers.items()}
-        self.directed_bandwidth_hz = dict(directed_bandwidth_hz or {})
+        self._channel_gains: dict[DirectedChannelKey, float] = {}
+        self._active_transfers: dict[DirectedChannelKey, TransferJob] = {}
+        self._communication_changed = False
         self.member_regions: dict[EntityRef, int] | None = None
         self.ground_owner_members: dict[EntityRef, EntityRef] | None = None
         self.route_planner = RoutePlanner()
@@ -224,6 +225,11 @@ class SchedulingRuntime:
     def _advance_clock(self, at: float) -> None:
         elapsed = at - self.now
         self.now = at
+        if elapsed:
+            for job in self._active_transfers.values():
+                # 浮点舍入可能使恰好完成时的剩余量略小于零。
+                job.remaining_bits = max(0.0, job.remaining_bits - job.rate_bps * elapsed)
+                self._settle_transfer_energy(job.transfer_id, elapsed)
         if elapsed and self._on_time_advance is not None:
             self._on_time_advance(elapsed)
 
@@ -234,10 +240,12 @@ class SchedulingRuntime:
             self._on_member_energy(node, amount)
 
     def _settle_transfer_energy(self, transfer_id: str, elapsed: float) -> None:
+        job = self.transfer_jobs[transfer_id]
+        energy = job.power_w * elapsed
+        job.tx_energy_j += energy
         source = self._transfer_channel[transfer_id].source
         if source.kind is EntityKind.MEMBER_UAV:
             binding = self._transfer_bindings[transfer_id]
-            energy = binding.power_w * elapsed
             binding.record.tx_energy_j += energy
             self._record_member_energy(source, energy, 1)
 
@@ -254,11 +262,11 @@ class SchedulingRuntime:
         return self._result
 
     def _close_slot(self) -> None:
-        # 已完成作业已按事件结算；这里只补记仍在运行的作业在截止前的部分。
+        # 传输进度和能耗已随时钟结算至截止；只补记未完成计算的部分。
         for channel in self.channels.values():
             job = channel.active
             if job is not None:
-                self._settle_transfer_energy(job.transfer_id, self.deadline - job.start_at)
+                job.bandwidth_hz = job.power_w = job.rate_bps = 0.0
             channel.queued.clear()
             channel.active = None
         for server in self.servers.values():
@@ -287,6 +295,7 @@ class SchedulingRuntime:
         self._events.clear()
         self._ready_for_server.clear()
         self.channels.clear()
+        self._active_transfers.clear()
         self._transfer_channel.clear()
         self._transfer_bindings.clear()
         self.active_tasks.clear()
@@ -301,6 +310,7 @@ class SchedulingRuntime:
 
     def update_entity_positions(self, positions: Mapping[EntityRef, np.ndarray]) -> None:
         """仅在当前时隙提交任务前更新实体位置快照。"""
+        self._channel_gains.clear()
         for entity, position in positions.items():
             position = np.asarray(position, dtype=float)
             self.entity_positions[entity] = position.copy()
@@ -323,11 +333,11 @@ class SchedulingRuntime:
         for index, (hop, transfer_id) in enumerate(zip(hops, transfer_ids)):
             self.transfer_jobs[transfer_id] = TransferJob(
                 transfer_id=transfer_id, source_ready_at=None,
-                duration_s=self.transfer_duration_s(hop, payload_bits),
+                payload_bits=payload_bits, channel_gain=self._channel_gain(hop),
             )
             self._transfer_channel[transfer_id] = hop
             self._transfer_bindings[transfer_id] = _TransferBinding(
-                task.key, record, self.transmit_powers[hop.source],
+                task.key, record,
                 next_transfer_id=transfer_ids[index + 1] if index + 1 < len(hops) else None,
                 predecessor=predecessor, is_input=is_input,
             )
@@ -344,15 +354,20 @@ class SchedulingRuntime:
         state.enqueue(job)
 
     def transfer_duration_s(self, hop: DirectedChannelKey, payload_bits: float) -> float:
-        """当前物理快照上的单跳时延，不含排队；排序和实际执行共用。"""
-        transmitter = self.entity_positions[hop.source]
-        receiver = self.entity_positions[hop.target]
-        power = self.transmit_powers[hop.source]
-        bandwidth_hz = self.directed_bandwidth_hz.get(hop, self._default_bandwidth_hz(hop))
-        metrics = self.channel_model.calculate_link(
-            transmitter, receiver, power, self._link_type(hop), bandwidth_hz
+        """ERS 的独占资源参考时延；实际执行由共享资源和剩余数据决定。"""
+        rate = self.channel_model.rate_bps(
+            self._channel_gain(hop), self.transmit_powers[hop.source],
+            self.channel_model.config.total_bandwidth_mhz * 1e6,
         )
-        return float(payload_bits) / metrics.rate_bps
+        return float(payload_bits) / rate
+
+    def _channel_gain(self, hop: DirectedChannelKey) -> float:
+        if hop not in self._channel_gains:
+            self._channel_gains[hop] = self.channel_model.calculate_link(
+                self.entity_positions[hop.source], self.entity_positions[hop.target],
+                self.transmit_powers[hop.source], self._link_type(hop),
+            ).average_channel_gain
+        return self._channel_gains[hop]
 
     def candidate_execution_nodes(
         self, owner_member: EntityRef, ground_device: EntityRef,
@@ -361,14 +376,6 @@ class SchedulingRuntime:
         region = self.member_regions[owner_member]
         members = sorted(member for member, region_id in self.member_regions.items() if region_id == region)
         return (ground_device, *members, self.global_bs)
-
-    def _default_bandwidth_hz(self, hop: DirectedChannelKey) -> float:
-        config = self.channel_model.config
-        return {
-            LinkType.GROUND_TO_AIR: config.ground_to_air_bandwidth_mhz,
-            LinkType.AIR_TO_AIR: config.air_to_air_bandwidth_mhz,
-            LinkType.AIR_TO_GROUND: config.air_to_ground_bandwidth_mhz,
-        }[self._link_type(hop)] * 1e6
 
     @staticmethod
     def _link_type(hop: DirectedChannelKey) -> LinkType:
@@ -380,8 +387,9 @@ class SchedulingRuntime:
 
     def _handle_transfer_finish(self, transfer_id: str, at: float) -> None:
         state = self.channels[self._transfer_channel[transfer_id]]
-        job = state.finish_active(at)
-        self._settle_transfer_energy(transfer_id, at - job.start_at)
+        state.finish_active(at)
+        del self._active_transfers[state.key]
+        self._communication_changed = True
         binding = self._transfer_bindings[transfer_id]
         if binding.next_transfer_id is not None:
             self._activate_transfer(binding.next_transfer_id, at)
@@ -427,9 +435,10 @@ class SchedulingRuntime:
             binding = self._transfer_bindings[job.transfer_id]
             if binding.record.start_at is None:
                 binding.record.start_at = at
-            heapq.heappush(
-                self._events, (job.finish_at, next(self._event_counter), "transfer_finish", job.transfer_id)
-            )
+            self._active_transfers[key] = job
+            self._communication_changed = True
+        if self._communication_changed:
+            self._reallocate_transfers(at)
         for server in self.servers.values():
             for record in server.dispatch(at):
                 task = self.tasks[record.task_key]
@@ -438,3 +447,14 @@ class SchedulingRuntime:
                     self._events,
                     (record.finish_at, next(self._event_counter), "compute_finish", (server.node, record.core_id)),
                 )
+
+    def _reallocate_transfers(self, at: float) -> None:
+        allocate_transfers(self._active_transfers, self.channel_model, self.transmit_powers, at)
+        # 整批替换通信预测，保留计算事件；避免旧事件误触发和无效堆条目累积。
+        self._events = [event for event in self._events if event[2] != "transfer_finish"]
+        self._events.extend(
+            (job.predicted_finish_at, next(self._event_counter), "transfer_finish", job.transfer_id)
+            for job in self._active_transfers.values()
+        )
+        heapq.heapify(self._events)
+        self._communication_changed = False

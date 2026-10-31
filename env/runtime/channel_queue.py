@@ -15,11 +15,18 @@ class TransferStatus(str, Enum):
 
 @dataclass
 class TransferJob:
-    """等待源数据就绪的单次、不可抢占传输。"""
+    """单次传输持续占用 FIFO 队首，资源份额可变；finish_at 仅记录实际完成。"""
 
     transfer_id: str
     source_ready_at: float | None
-    duration_s: float
+    payload_bits: float
+    channel_gain: float = 0.0
+    remaining_bits: float = field(init=False)
+    bandwidth_hz: float = field(default=0.0, init=False)
+    power_w: float = field(default=0.0, init=False)
+    rate_bps: float = field(default=0.0, init=False)
+    predicted_finish_at: float | None = field(default=None, init=False)
+    tx_energy_j: float = field(default=0.0, init=False)  # 本跳实际发送能耗，含所有设备类型。
     status: TransferStatus = field(default=TransferStatus.QUEUED, init=False)
     start_at: float | None = field(default=None, init=False)
     finish_at: float | None = field(default=None, init=False)
@@ -27,7 +34,8 @@ class TransferJob:
     def __post_init__(self) -> None:
         if self.source_ready_at is not None:
             self.source_ready_at = float(self.source_ready_at)
-        self.duration_s = float(self.duration_s)
+        self.payload_bits = float(self.payload_bits)
+        self.remaining_bits = self.payload_bits
 
 
 @dataclass
@@ -52,7 +60,6 @@ class DirectedChannelState:
         self.queued.popleft()
         head.status = TransferStatus.ACTIVE
         head.start_at = now
-        head.finish_at = now + head.duration_s
         self.active = head
         return head
 
@@ -60,6 +67,9 @@ class DirectedChannelState:
         at = float(at)
         finished = self.active
         finished.status = TransferStatus.FINISHED
+        finished.finish_at = at
+        finished.remaining_bits = 0.0
+        finished.bandwidth_hz = finished.power_w = finished.rate_bps = 0.0
         self.active = None
         self.next_free_at = at
         return finished

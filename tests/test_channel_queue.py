@@ -19,16 +19,16 @@ class TestDirectedChannelState(unittest.TestCase):
 
     @staticmethod
     def _job(
-        transfer_id: str, source_ready_at: float, duration_s: float
+        transfer_id: str, source_ready_at: float, payload_bits: float
     ) -> TransferJob:
         return TransferJob(
             transfer_id=transfer_id,
             source_ready_at=source_ready_at,
-            duration_s=duration_s,
+            payload_bits=payload_bits,
         )
 
     def test_opposite_directions_can_start_at_the_same_time(self):
-        """FDD 的反向信道是独立资源，允许同刻启动。"""
+        """正交分配下的反向信道有独立队列，允许同刻启动。"""
         member = self._member(0)
         bs = self._bs()
         uplink = DirectedChannelState(DirectedChannelKey(member, bs))
@@ -43,7 +43,7 @@ class TestDirectedChannelState(unittest.TestCase):
         self.assertEqual(down.start_at, 0.0)
 
     def test_different_entity_pairs_can_start_at_the_same_time(self):
-        """两个不同 Member 到同一 BS 的链路也应相互独立。"""
+        """两个不同 Member 到同一 BS 的信道可并发，资源由运行时统一分配。"""
         bs = self._bs()
         member_zero = DirectedChannelState(DirectedChannelKey(self._member(0), bs))
         member_one = DirectedChannelState(DirectedChannelKey(self._member(1), bs))
@@ -63,12 +63,13 @@ class TestDirectedChannelState(unittest.TestCase):
         channel.enqueue(self._job("second", 0.0, 1.0))
 
         first = channel.start_head(0.0)
-        channel.finish_active(first.finish_at)
+        channel.finish_active(2.0)
         second = channel.start_head(2.0)
 
         self.assertEqual(first.finish_at, 2.0)
         self.assertEqual(second.start_at, 2.0)
-        self.assertEqual(second.finish_at, 3.0)
+        self.assertIsNone(second.finish_at)
+        self.assertEqual(second.remaining_bits, 1.0)
 
     def test_busy_channel_does_not_block_same_source_different_destination(self):
         ab = DirectedChannelState(DirectedChannelKey(self._member(0), self._member(1)))

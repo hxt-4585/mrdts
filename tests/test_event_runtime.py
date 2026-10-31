@@ -40,10 +40,6 @@ class TestSchedulingRuntime(unittest.TestCase):
                 self.other_member: 1.0,
                 self.bs: 1.0,
             },
-            directed_bandwidth_hz={
-                DirectedChannelKey(self.ground, self.member): 1e9,
-                DirectedChannelKey(self.member, self.bs): 1e9,
-            },
             member_regions={self.member: 1, self.other_member: 1},
             ground_owner_members={self.ground: self.member},
         )
@@ -63,14 +59,14 @@ class TestSchedulingRuntime(unittest.TestCase):
         self.runtime.submit_placements({parent: PlacementDecision(self.member)})
         input_hop = DirectedChannelKey(self.ground, self.member)
         self.assertEqual(self.runtime.trace(parent).input_bits, 1000.)
-        self.assertAlmostEqual(self.runtime.channel_state(input_hop).active.duration_s,
+        self.assertAlmostEqual(self.runtime.channel_state(input_hop).active.predicted_finish_at - self.runtime.now,
                                self.runtime.transfer_duration_s(input_hop, 1000.))
         self.runtime.advance_to_decision()
         self.runtime.submit_placements({child: PlacementDecision(self.bs)})
         edge_hop = DirectedChannelKey(self.member, self.bs)
         transfer_id = self.runtime.trace(child).predecessor_records[parent].transfer_ids[0]
-        self.assertAlmostEqual(self.runtime.transfer_jobs[transfer_id].duration_s,
-                               self.runtime.transfer_duration_s(edge_hop, 1000.))
+        self.assertEqual(self.runtime.transfer_jobs[transfer_id].payload_bits, 1000.)
+        self.assertEqual(self.runtime.transfer_jobs[transfer_id].bandwidth_hz, 6e6)
 
     def test_relayed_inputs_and_local_predecessor_enable_computation(self):
         keys = self.register()
@@ -88,7 +84,7 @@ class TestSchedulingRuntime(unittest.TestCase):
         self.runtime.submit_placements({keys[0]: PlacementDecision(self.member)})
         channel = self.runtime.channel_state(DirectedChannelKey(self.ground, self.member))
         active = channel.active
-        self.runtime.advance_until(active.finish_at / 2.)
+        self.runtime.advance_until(active.predicted_finish_at / 2.)
         self.assertIs(channel.active, active)
         self.assertIsNone(self.runtime.trace(keys[1]).input_record)
 

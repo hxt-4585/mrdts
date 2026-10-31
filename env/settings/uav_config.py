@@ -35,6 +35,7 @@ class UAVConfig:
     bs_altitude: float
     bs_core_count: int
     bs_core_frequency: float
+    bs_transmit_power: float
 
     @classmethod
     def default(cls) -> "UAVConfig":
@@ -71,4 +72,5 @@ class UAVConfig:
             bs_altitude=bs["altitude"],
             bs_core_count=bs["core_count"],
             bs_core_frequency=bs["core_frequency"],
+            bs_transmit_power=bs["transmit_power"],
         )

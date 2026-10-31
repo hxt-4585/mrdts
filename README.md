@@ -31,6 +31,12 @@ uv run python scripts/visualize_scheduling.py
 
 ## 验证与模型资料
 
+通信使用全网共享的连续带宽池，所有活动有向信道均分带宽，各发送设备的活动发送信道均分该设备总功率。假设理想正交、不同频带同时收发，忽略外部干扰、收发自干扰及重分配开销，不显式建模子载波。速率为 `b * log2(1 + p * g / (N0 * b))`。
+
+`config/channel.toml` 的 `[bandwidth].total_mhz` 配置全网总带宽（默认 12 MHz）；`[propagation].noise_density_w_per_hz` 配置等效噪声谱密度（默认 `2.5e-20 W/Hz`，由旧噪声功率 `1e-13 W` 在 4 MHz 下换算）。原三类独立带宽和固定噪声功率字段已移除。设备总功率预算分别使用 `config/uav.toml` 的 `[member].transmit_power`、`[bs].transmit_power` 和 `config/user.toml` 的 `[population].transmit_power`。
+
+每次活动传输变化时重新分配资源，先按旧速率和功率结算剩余数据与发送能耗，再更新完成时间预测。同一有向信道保持 FIFO，多跳仅在上一跳完成后激活。`TransferJob.predicted_finish_at` 表示预计完成，`finish_at` 仅在真实完成时填写；窗口截止不补算未发送的数据。窗口能耗统计仍只包含 Member UAV。ERS 使用独占资源参考时延排序，实际执行时长由运行时资源竞争决定。
+
 ```powershell
 uv run python -B -m unittest discover -s tests
 ```

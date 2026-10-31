@@ -1,10 +1,13 @@
 """在线卸载的可手算事件场景；策略在测试调用方选择任务与位置。"""
 
 import unittest
+import math
+from dataclasses import replace
 
 import numpy as np
 
 from env.communication.channel_model import ChannelModel
+from env.settings import ChannelConfig
 from env.contracts import DAGRequest, PlacementDecision
 from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 from env.runtime.task_runtime import TaskStatus
@@ -18,19 +21,16 @@ def make_runtime(duration=30.0, cores=1, **runtime_options):
     bs = EntityRef(EntityKind.BS, 0)
     positions = {node: np.array([i * 10., 0., 10. if node in members else 0.])
                  for i, node in enumerate((*members, *grounds, bs))}
-    model = ChannelModel()
-    bandwidths = {}
-    for source in positions:
-        for target in positions:
-            if source == target:
-                continue
-            hop = DirectedChannelKey(source, target)
-            rate = model.calculate_link(positions[source], positions[target], 1.,
-                                        SchedulingRuntime._link_type(hop), 1.).rate_bps
-            bandwidths[hop] = 1000. / rate
+    class UnitGainModel(ChannelModel):
+        """均一增益使独占速率为 1000 bit/s，并发时仍使用真实共享公式。"""
+        def calculate_link(self, *args, **kwargs):
+            return replace(super().calculate_link(*args, **kwargs), average_channel_gain=1.)
+
+    model = UnitGainModel(replace(ChannelConfig.default(), total_bandwidth_mhz=.001,
+                                 noise_density_w_per_hz=.001))
     runtime = SchedulingRuntime(
         model, positions, {node: ServerSpec((10.,) * cores, .01) for node in positions},
-        {node: 1. for node in positions}, bandwidths,
+        {node: 1. for node in positions},
         member_regions={node: 1 for node in members},
         ground_owner_members=dict(zip(grounds, members)), max_duration_s=duration,
         **runtime_options,
@@ -98,9 +98,11 @@ class TestSerialRuntime(unittest.TestCase):
         self.runtime.advance_until(3.)
         self.assertIsNone(task.compute_start_at)
         self.runtime.advance_to_decision()
-        self.assertAlmostEqual(task.predecessor_arrival_at[parent], 4.)
-        self.assertAlmostEqual(task.input_arrival_at, 6.)
-        self.assertAlmostEqual(task.compute_start_at, 6.)
+        # 两个不同发送端各得一半带宽、完整功率，速率为 log2(3)/2 kbit/s。
+        input_end = 1. + 4. / math.log2(3.)
+        self.assertAlmostEqual(task.predecessor_arrival_at[parent], input_end + 1.)
+        self.assertAlmostEqual(task.input_arrival_at, input_end + 3.)
+        self.assertAlmostEqual(task.compute_start_at, input_end + 3.)
 
     def test_two_results_on_same_channel_serialize(self):
         dag = request(self.members[0], self.grounds[0], inputs=(0., 0., 0.),
@@ -129,8 +131,9 @@ class TestSerialRuntime(unittest.TestCase):
         self.runtime.advance_to_decision()
         child = self.runtime.trace(fast.task_keys[1])
         self.assertAlmostEqual(child.predecessor_records[fast.task_keys[0]].start_at, 1.)
-        self.assertAlmostEqual(child.compute_finish_at, 3.)
-        self.assertAlmostEqual(self.runtime.trace(slow.task_keys[0]).input_arrival_at, 10.)
+        shared_duration = 2. / math.log2(3.)
+        self.assertAlmostEqual(child.compute_finish_at, 2. + shared_duration)
+        self.assertAlmostEqual(self.runtime.trace(slow.task_keys[0]).input_arrival_at, 9. + shared_duration)
 
     def test_waiting_data_does_not_reserve_core_or_fifo_position(self):
         slow = request(self.members[0], self.grounds[0], inputs=(0., 0.), cycles=(10., 10.),

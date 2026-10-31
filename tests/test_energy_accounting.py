@@ -48,7 +48,7 @@ class TestEnergyAccounting(unittest.TestCase):
         row = next(row for row in result.member_energy if row.member_id == 1)
         self.assertEqual(row.compute_energy_j, 20.)
 
-    def test_each_relay_hop_charged_on_finish_and_ground_bs_are_excluded(self):
+    def test_each_relay_hop_charged_incrementally_and_ground_bs_are_excluded(self):
         runtime, members, grounds, bs = self.make_runtime(duration=16.)
         dag = request(members[0], grounds[0], inputs=(0., 0.), cycles=(10., 10.),
                       edges=((0, 1),), sizes=(2.,))
@@ -58,14 +58,15 @@ class TestEnergyAccounting(unittest.TestCase):
         runtime.submit_placements({child: PlacementDecision(grounds[0])})
         record = runtime.trace(child).predecessor_records[parent]
         runtime.advance_until(2.)
-        self.assertEqual(record.tx_energy_j, 0.)
+        self.assertEqual(record.tx_energy_j, 1.)
         runtime.advance_until(3.)  # Member 1 -> Member 0 完成，用户还没收到数据。
         self.assertEqual(record.tx_energy_j, 2.)
         self.assertIsNone(record.finish_at)
-        self.assertEqual(self.events[-1], (3., 1, 2.))
+        self.assertEqual(self.events[-1], (3., 1, 1.))
         runtime.advance_until(5.)
         self.assertEqual(record.tx_energy_j, 4.)
-        self.assertEqual(self.events[-1], (5., 0, 2.))
+        self.assertEqual(self.events[-1][:2], (5., 0))
+        self.assertAlmostEqual(self.events[-1][2], 2.)
         runtime.advance_to_decision()
         other = request(members[0], grounds[0], dag_id=1, inputs=(2., 0.), cycles=(10., 10.),
                         edges=((0, 1),), sizes=(1.,))

@@ -20,7 +20,7 @@ class TransferRecord:
     transfer_ids: tuple[str, ...]
     start_at: float | None = None
     finish_at: float | None = None
-    tx_energy_j: float = 0.0
+    tx_energy_j: float = 0.0  # 路由中 Member UAV 的发送能耗，与窗口统计口径一致。
 
 
 @dataclass

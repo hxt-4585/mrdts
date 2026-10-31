@@ -7,14 +7,12 @@ import tomllib
 
 @dataclass(frozen=True)
 class ChannelConfig:
-    """三类链路带宽与简化 LoS/NLoS 传播参数。"""
+    """全网正交共享带宽与简化 LoS/NLoS 传播参数。"""
 
-    ground_to_air_bandwidth_mhz: float
-    air_to_air_bandwidth_mhz: float
-    air_to_ground_bandwidth_mhz: float
+    total_bandwidth_mhz: float
     reference_channel_gain: float
     nlos_attenuation_factor: float
-    noise_power_w: float
+    noise_density_w_per_hz: float
     los_alpha: float
     los_beta: float
 
@@ -32,12 +30,10 @@ class ChannelConfig:
         propagation = data["propagation"]
         los_probability = propagation["los_probability"]
         return cls(
-            ground_to_air_bandwidth_mhz=bandwidth["ground_to_air_mhz"],
-            air_to_air_bandwidth_mhz=bandwidth["air_to_air_mhz"],
-            air_to_ground_bandwidth_mhz=bandwidth["air_to_ground_mhz"],
+            total_bandwidth_mhz=bandwidth["total_mhz"],
             reference_channel_gain=propagation["reference_channel_gain"],
             nlos_attenuation_factor=propagation["nlos_attenuation_factor"],
-            noise_power_w=propagation["noise_power_w"],
+            noise_density_w_per_hz=propagation["noise_density_w_per_hz"],
             los_alpha=los_probability["alpha"],
             los_beta=los_probability["beta"],
         )

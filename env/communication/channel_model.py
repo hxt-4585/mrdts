@@ -61,12 +61,11 @@ class ChannelModel:
         nlos_gain = self.config.nlos_attenuation_factor * los_gain
         average_channel_gain = los_probability * los_gain + (1.0 - los_probability) * nlos_gain
         bandwidth_hz = (
-            self._bandwidth_hz(link_type)
+            self.config.total_bandwidth_mhz * 1e6
             if bandwidth_hz is None
             else float(bandwidth_hz)
         )
-        snr = transmit_power_w * average_channel_gain / self.config.noise_power_w
-        rate_bps = bandwidth_hz * math.log2(1.0 + snr)
+        rate_bps = self.rate_bps(average_channel_gain, transmit_power_w, bandwidth_hz)
 
         return LinkMetrics(
             link_type=link_type,
@@ -103,10 +102,8 @@ class ChannelModel:
             * math.exp(-self.config.los_beta * (elevation_angle_deg - self.config.los_alpha))
         )
 
-    def _bandwidth_hz(self, link_type: LinkType) -> float:
-        bandwidth_mhz = {
-            LinkType.GROUND_TO_AIR: self.config.ground_to_air_bandwidth_mhz,
-            LinkType.AIR_TO_AIR: self.config.air_to_air_bandwidth_mhz,
-            LinkType.AIR_TO_GROUND: self.config.air_to_ground_bandwidth_mhz,
-        }[link_type]
-        return bandwidth_mhz * 1e6
+    def rate_bps(self, channel_gain: float, transmit_power_w: float, bandwidth_hz: float) -> float:
+        """理想正交信道：r = b log2(1 + p g / (N0 b))；增益为功率增益。"""
+        noise_w = self.config.noise_density_w_per_hz * bandwidth_hz
+        snr = transmit_power_w * channel_gain / noise_w
+        return bandwidth_hz * (math.log1p(snr) / math.log(2.0))

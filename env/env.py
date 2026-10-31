@@ -210,7 +210,8 @@ class MRDTSEnv:
         servers = {}
         for node_id, node in enumerate(compute_nodes):
             positions[node] = members.positions[node_id]
-            powers[node] = members.config.member_transmit_power
+            powers[node] = (members.config.bs_transmit_power if node.kind is EntityKind.BS
+                            else members.config.member_transmit_power)
             servers[node] = ServerSpec(
                 tuple(members.core_frequencies[node_id, :members.core_counts[node_id]]),
                 members.config.member_capacitance_factor,

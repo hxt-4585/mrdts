@@ -31,7 +31,7 @@ capacitance_factor = 1e-28
 
 # 以 Member UAV 为球心的三维通信覆盖半径（m）。
 coverage_radius = 180.0
-# Member UAV 的发射功率（W）。
+# 每架 Member UAV 的总发射功率预算（W），其活动发送信道均分。
 transmit_power = 1.0
 
 [bs]
@@ -41,3 +41,6 @@ altitude = 25.0
 core_count = 4
 # 每个 BS 计算核心的频率（CPU cycles/s）。
 core_frequency = 12000000000.0
+
+# BS 的总发射功率预算（W），其活动发送信道均分。
+transmit_power = 1.0

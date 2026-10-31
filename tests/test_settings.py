@@ -53,15 +53,13 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.core_frequency, 1e9)
 
     def test_channel_config_loads_link_and_propagation_parameters(self):
-        """通信模型配置应保留三类带宽与 LoS/NLoS 参数。"""
+        """通信模型配置包含全网带宽、噪声谱密度和 LoS/NLoS 参数。"""
         config = ChannelConfig.from_toml(PROJECT_ROOT / "config" / "channel.toml")
 
-        self.assertEqual(config.ground_to_air_bandwidth_mhz, 4.0)
-        self.assertEqual(config.air_to_air_bandwidth_mhz, 6.0)
-        self.assertEqual(config.air_to_ground_bandwidth_mhz, 4.0)
+        self.assertEqual(config.total_bandwidth_mhz, 12.0)
         self.assertEqual(config.reference_channel_gain, 1e-6)
         self.assertEqual(config.nlos_attenuation_factor, 0.2)
-        self.assertEqual(config.noise_power_w, 1e-13)
+        self.assertEqual(config.noise_density_w_per_hz, 2.5e-20)
         self.assertEqual(config.los_alpha, 9.61)
         self.assertEqual(config.los_beta, 0.16)
 
@@ -78,6 +76,7 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.member_capacitance_factor, 1e-28)
         self.assertEqual(config.member_coverage_radius, 180.0)
         self.assertEqual(config.member_transmit_power, 1.0)
+        self.assertEqual(config.bs_transmit_power, 1.0)
 
     def test_member_physical_parameters_are_not_nested_in_toml_groups(self):
         """Member 的物理参数应直接位于 [member]，便于统一查阅。"""

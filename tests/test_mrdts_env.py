@@ -406,7 +406,8 @@ class TestMRDTSEnv(unittest.TestCase):
         settings = self.settings()
         settings["user"] = replace(settings["user"], total_users=8, transmit_power=.3, core_frequency=1.7e9)
         settings["env"] = replace(settings["env"], scheduling_duration_s=2.5)
-        settings["channel"] = replace(settings["channel"], air_to_air_bandwidth_mhz=17.)
+        settings["channel"] = replace(settings["channel"], total_bandwidth_mhz=17.)
+        settings["uav"] = replace(settings["uav"], bs_transmit_power=2.5)
         environment = MRDTSEnv(settings)
         environment.generate_scene()
         environment.reset(epoch_index=0)
@@ -426,6 +427,7 @@ class TestMRDTSEnv(unittest.TestCase):
         self.assertIs(runtime.channel_model.config, settings["channel"])
         ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
         self.assertEqual(runtime.transmit_powers[ground], .3)
+        self.assertEqual(runtime.transmit_powers[runtime.global_bs], 2.5)
         self.assertEqual(runtime.servers[ground].core_frequencies, (1.7e9,))
         for member_id in range(environment.members.member_uav_count):
             server = runtime.servers[EntityRef(EntityKind.MEMBER_UAV, member_id)]

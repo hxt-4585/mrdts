@@ -13,27 +13,34 @@ from scripts.ers import ERS
 
 
 def make_runtime(*, asymmetric=False):
-    """用真实 ChannelModel 的定向带宽构造 20/100 Mbps 手算场景。"""
+    """使用全网同一带宽；可用不同设备功率构造非对称通信代价。"""
     ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
     member = EntityRef(EntityKind.MEMBER_UAV, 0)
     bs = EntityRef(EntityKind.BS, 0)
     positions = {ground: np.array([0., 0., 0.]), member: np.array([0., 0., 100.]),
                  bs: np.array([100., 0., 20.])}
     model = ChannelModel()
-    rates = {(ground, member): 20e6, (member, ground): 10e6 if asymmetric else 20e6,
-             (member, bs): 100e6, (bs, member): 50e6 if asymmetric else 100e6}
-    bandwidths = {}
-    for (source, target), rate in rates.items():
-        link_type = "air_to_ground" if source == member else "ground_to_air"
-        per_hz = model.calculate_link(positions[source], positions[target], 1., link_type, 1.).rate_bps
-        bandwidths[DirectedChannelKey(source, target)] = rate / per_hz
+    powers = {ground: .5 if asymmetric else 1., member: 1., bs: 2. if asymmetric else 1.}
     runtime = SchedulingRuntime(
         model, positions,
         {ground: ServerSpec((1e9,), 0.), member: ServerSpec((10e9, 10e9), 1e-28),
          bs: ServerSpec((12e9,) * 4, 1e-28)},
-        {node: 1. for node in positions}, bandwidths,
+        powers,
         member_regions={member: 1}, ground_owner_members={ground: member})
     return runtime, ground, member, bs
+
+
+def hop_cost(runtime, source, target):
+    return runtime.channel_model.transmission_delay_s(
+        1., runtime.entity_positions[source], runtime.entity_positions[target],
+        runtime.transmit_powers[source], SchedulingRuntime._link_type(DirectedChannelKey(source, target)))
+
+
+def weighted_comm(runtime, ground, member, bs, bits):
+    # 1/2/4 个核心的所有有序位置对：地面链路权重 6，BS 链路权重 12。
+    ground_pair = hop_cost(runtime, ground, member) + hop_cost(runtime, member, ground)
+    bs_pair = hop_cost(runtime, member, bs) + hop_cost(runtime, bs, member)
+    return bits * (6 * ground_pair + 12 * bs_pair) / 49
 
 
 def make_dag(cycles=(1e8, 1e8), input_kbit=1000.0, edge_kbit=1000.0):
@@ -61,8 +68,9 @@ class TestERS(unittest.TestCase):
 
         self.assertEqual(set(costs.candidates), {ground, member, bs})
         self.assertAlmostEqual(costs.average_compute_s[0], (0.1 + 0.02 + 4 / 120) / 7)
-        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], 0.84 / 49)
-        self.assertAlmostEqual(costs.path_seconds_per_bit[ground, bs] * 1e6, .06)
+        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], weighted_comm(runtime, ground, member, bs, 1e6))
+        self.assertAlmostEqual(costs.path_seconds_per_bit[ground, bs],
+                               hop_cost(runtime, ground, member) + hop_cost(runtime, member, bs))
         for node in costs.candidates:
             self.assertEqual(costs.path_seconds_per_bit[node, node], 0.)
 
@@ -70,9 +78,12 @@ class TestERS(unittest.TestCase):
         runtime, ground, member, bs = make_runtime(asymmetric=True)
         costs = ERS(runtime).average_costs(DAGRequest(0, make_dag(edge_kbit=1.), member, ground))
 
-        self.assertAlmostEqual(costs.path_seconds_per_bit[ground, bs] * 1e6, .06)
-        self.assertAlmostEqual(costs.path_seconds_per_bit[bs, ground] * 1e6, .12)
-        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], 1.26 / 49 * 1000 / 1e6)
+        self.assertAlmostEqual(costs.path_seconds_per_bit[ground, bs],
+                               hop_cost(runtime, ground, member) + hop_cost(runtime, member, bs))
+        self.assertAlmostEqual(costs.path_seconds_per_bit[bs, ground],
+                               hop_cost(runtime, bs, member) + hop_cost(runtime, member, ground))
+        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], weighted_comm(runtime, ground, member, bs, 1000.))
+        self.assertNotEqual(costs.path_seconds_per_bit[ground, bs], costs.path_seconds_per_bit[bs, ground])
 
     def test_input_size_does_not_change_ranks(self):
         runtime, ground, member, _ = make_runtime()
@@ -113,12 +124,12 @@ class TestERS(unittest.TestCase):
         servers = {node: ServerSpec(s.core_frequencies, s.capacitance_factor) for node, s in runtime.servers.items()}
         servers.update({other_ground: ServerSpec((1e9,), 0.), remote: ServerSpec((1e9,) * 50, 1e-28)})
         extended = SchedulingRuntime(runtime.channel_model, positions, servers,
-                                     {node: 1. for node in positions}, runtime.directed_bandwidth_hz,
+                                     {node: 1. for node in positions},
                                      member_regions={member: 1, remote: 2},
                                      ground_owner_members={ground: member, other_ground: remote})
         costs = ERS(extended).average_costs(DAGRequest(0, make_dag(), member, ground))
         self.assertEqual(set(costs.candidates), {ground, member, bs})
-        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], .84 / 49)
+        self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], weighted_comm(extended, ground, member, bs, 1e6))
         requests = [DAGRequest(0, make_dag(), member, ground),
                     DAGRequest(0, make_dag(), remote, other_ground)]
         plan = ERS(extended).plan(requests)
@@ -136,7 +147,7 @@ class TestERS(unittest.TestCase):
         servers = {node: ServerSpec(s.core_frequencies, s.capacitance_factor) for node, s in runtime.servers.items()}
         servers[other_ground] = ServerSpec((1e9,), 0.)
         extended = SchedulingRuntime(runtime.channel_model, positions, servers,
-                                     {node: 1. for node in positions}, runtime.directed_bandwidth_hz,
+                                     {node: 1. for node in positions},
                                      member_regions={member: 1},
                                      ground_owner_members={ground: member, other_ground: member})
         requests = [DAGRequest(0, make_dag(), member, user) for user in (ground, other_ground)]
