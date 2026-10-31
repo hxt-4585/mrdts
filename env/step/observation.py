@@ -5,6 +5,7 @@ import numpy as np
 from env.entities.region import Region
 from env.entities.uav import MasterUAV, MemberUAV
 from env.runtime.event_runtime import SchedulingRuntime
+from env.runtime.task_runtime import TaskStatus
 from env.settings import DAGConfig
 from env.types import EntityKind, EntityRef, TaskKey
 
@@ -73,6 +74,9 @@ class MemberObservation:
         计算等待时间 (M+2，除以固定调度窗口长度)、当前用户位置 (2，x/L、y/L)。
         前驱位置和等待时间均按全局 Member ID、BS、当前任务所属用户的顺序排列。
         位置、能量队列和 Member 计算等待时间仅显示本区域（含自身），其余置零；
+        能量队列在已入账值上补入原始输入已到达目标 UAV 的活动任务完整计算能耗，
+        包括等待前驱结果、FIFO 排队及运行中的任务，不预测传输能耗或截断到截止时间。
+        Member 各核心同频，按目标服务器的 kappa*C*f^2 计算；仅生成观测，不重复入账。
         BS、当前用户的等待时间及用户位置始终可见。等待时间基于 runtime.now 的运行及就绪负载，
         不含传输和新任务自身计算时间，允许超过窗口长度，不截断到 1。
         同一执行位置存在多个前驱也只置 1；用户位置及本地等待项仅对应 task_key.user_id。
@@ -103,6 +107,22 @@ class MemberObservation:
         positions = observation[4 + 2 * member_count:4 + 4 * member_count].reshape(member_count, 2)
         energy_queues = observation[4 + 4 * member_count:4 + 5 * member_count]
         _write_member_state(self.region, self.members, visible, positions, energy_queues)
+
+        # 每个 owner 至多一个活动任务，避免扫描所有 DAG 子任务。
+        # 计算完成才入账，因此运行中的任务也补入完整能耗，而非只计剩余部分。
+        for active_key in runtime.active_tasks.values():
+            active_task = tasks[active_key]
+            node = active_task.execution_node
+            if (active_task.status is TaskStatus.FAILED
+                    or active_task.input_arrival_at is None
+                    or node.kind is not EntityKind.MEMBER_UAV
+                    or not visible[node.index]):
+                continue
+            server = runtime.servers[node]
+            energy_queues[node.index] += (
+                server.capacitance_factor * active_task.cpu_cycles * server.core_frequencies[0] ** 2
+                / self.members.config.member_slot_energy
+            )
 
         compute_wait = observation[4 + 5 * member_count:-2]
         duration = runtime.deadline - runtime.slot_start
