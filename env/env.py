@@ -141,13 +141,23 @@ class MRDTSEnv:
         self._runtime.submit_placements(placements)
         return self._runtime.advance_to_decision()
 
+    def pop_member_rewards(self) -> dict[TaskKey, float]:
+        """在 begin_step 与 end_step 之间领取已完成任务的奖励。
+
+        通常在 submit_schedule 后调用；按 TaskKey 对应各 owner 的原动作，
+        不保证属于刚提交的批次。尚在执行的任务不返回奖励，重复领取为空。
+        end_step 会在结果中返回剩余未领取奖励。
+        """
+        return self._runtime.pop_member_rewards()
+
     def end_step(self) -> EndStepResult:
         """每步调用一次：完成执行并结算后扣除一次预算，返回快照并推进步数。
 
         已完成作业和飞行能耗已入账，finish_slot 执行剩余已提交作业并补计悬停。
-        调度时钟不含飞行阶段；奖励由后续确定的奖励模型计算。
+        调度时钟不含飞行阶段；返回尚未领取的 Member 完成奖励。
         """
         slot_result = self._runtime.finish_slot()
+        member_rewards = self._runtime.pop_member_rewards()
         count = self.members.member_uav_count
         compute_energy = np.zeros(count)
         tx_energy = np.zeros(count)
@@ -166,6 +176,8 @@ class MRDTSEnv:
         return EndStepResult(
             slot_result, compute_energy, tx_energy, flight_energy, hover_energy,
             total_energy, queues.copy(), self.step_index >= self.env_config.steps_per_epoch,
+            scheduling_duration_s=self.env_config.scheduling_duration_s,
+            member_rewards=member_rewards,
         )
 
     def _record_member_energy(self, node: EntityRef, energy_j: float) -> None:

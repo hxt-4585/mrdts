@@ -1,43 +1,40 @@
-"""分层奖励框架；公式尚未实现，也尚未接入环境事件流程。"""
+"""时延奖励：Master 使用全系统 DAG 均值，Member 使用本地归一化成本。"""
 
-import numpy as np
-
-from env.contracts import EndStepResult
+from env.runtime.slot_result import SlotResult
 from env.runtime.task_runtime import TaskRuntime
 
 
 class MasterReward:
     """系统级时隙奖励，所有 Master 共享同一个标量奖励。"""
 
-    def compute(
-        self,
-        result: EndStepResult,
-        *,
-        flight_violations: np.ndarray,
-    ) -> float:
-        """在 end_step 结算后，为整个系统计算一次标量奖励。
+    def __init__(self, scheduling_duration_s: float):
+        self.scheduling_duration_s = scheduling_duration_s
 
-        result 为全系统的本时隙结算结果；flight_violations 为 begin_step
-        返回的全网 (M,) 越界标记。统计范围覆盖全部区域和 Member，
-        不按单个 Master 或其所属区域拆分。
-        后续在此确定全系统 DAG 时延、失败、能耗及越界惩罚的组合方式。
+    def compute(self, result: SlotResult) -> float:
+        """所有 DAG 完成后返回 -sum(C_g - slot_start) / (N * H)。
+
+        调用方保证本窗口的全部 DAG 已完成。每个 DAG 权重相同，统计
+        覆盖全部区域和 Member；H 为固定名义调度时隙长度，奖励无量纲。
         """
-        raise NotImplementedError("Master 系统级时隙奖励公式尚未实现")
+        return -sum(dag.completion_time - result.slot_start for dag in result.dags) / (
+            len(result.dags) * self.scheduling_duration_s
+        )
 
 
 class MemberReward:
     """子任务级奖励，对应 owner Member 的一次执行位置决策。"""
 
+    def __init__(self, scheduling_duration_s: float):
+        self.scheduling_duration_s = scheduling_duration_s
+
     def compute(self, task: TaskRuntime) -> float:
-        """为一个已提交动作、已完成或截止失败的子任务计算标量奖励。
+        """仅对实际计算完成的任务计算 -U_i * Δt / (N_i * H)。
 
-        调用方以 task.key 将奖励关联到原动作，每个子任务只结算一次；
-        不为尚未提交动作的子任务单独生成卸载奖励。
-        正常完成时使用 compute_finish_at，截止失败时使用 failed_at，
-        相对 decision_at 的间隔包含传输、等待数据、排队和计算时间。
-        后续在此确定时延、相关能耗及截止失败惩罚的组合方式。
-
-        仅传入本次真正结束的任务；submit_schedule 返回不代表本 Member
-        的任务已经结束。记录应在运行时释放前读取，或由调用方保留引用。
+        U_i 为决策观测时 owner Member 尚未完成的 DAG 数；N_i 为本窗口
+        登记给该 Member 的 DAG 总数，H 为固定名义调度时隙长度。
+        Δt 从提交动作到实际计算完成，包含传输、数据等待、排队和计算。
         """
-        raise NotImplementedError("Member 子任务级奖励公式尚未实现")
+        elapsed = task.compute_finish_at - task.decision_at
+        return -task.unfinished_dags_at_decision * elapsed / (
+            task.managed_dag_count * self.scheduling_duration_s
+        )

@@ -14,6 +14,31 @@ from tests.test_serial_runtime import request
 
 
 class TestEndStep(unittest.TestCase):
+    def test_member_rewards_are_drained_online_or_preserved_at_end_step(self):
+        env = self.make_environment(duration=2.)
+        owner = EntityRef(EntityKind.MEMBER_UAV, 0)
+        ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
+        cycles = env.members.config.member_core_frequency * .25
+        dag = request(owner, ground, inputs=(0., 0.), cycles=(cycles, cycles))
+        actions = np.zeros((env.members.member_uav_count, 2))
+        with patch.object(env, "_generate_dag_requests", return_value=(dag,)):
+            env.begin_step(actions)
+        self.assertEqual(env.pop_member_rewards(), {})
+        env.submit_schedule({dag.task_keys[0]: PlacementDecision(owner)})
+        first = env.pop_member_rewards()
+        self.assertEqual(first, {dag.task_keys[0]: -.125})
+        self.assertEqual(env.pop_member_rewards(), {})
+        env.submit_schedule({dag.task_keys[1]: PlacementDecision(owner)})
+        result = env.end_step()
+        self.assertEqual(result.member_rewards, {dag.task_keys[1]: -.125})
+        self.assertEqual(result.master_reward, -.25)
+        with patch.object(env, "_generate_dag_requests", return_value=(dag,)):
+            env.begin_step(actions)
+        self.assertEqual(env.pop_member_rewards(), {})
+        self.assertEqual(env.end_step().member_rewards, {})
+        self.assertEqual(first, {dag.task_keys[0]: -.125})
+        self.assertEqual(result.member_rewards, {dag.task_keys[1]: -.125})
+
     def make_environment(self, *, duration=2., budget=145.):
         settings = test_mrdts_env.TestMRDTSEnv.settings()
         settings["user"] = replace(settings["user"], total_users=8)

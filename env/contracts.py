@@ -1,11 +1,12 @@
 """仿真接受的 DAG 请求与子任务放置决策。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from env.types import EntityRef, TaskKey
 from env.runtime.slot_result import SlotResult
+from env.step.reward import MasterReward
 from env.workload.dag_generator import DAG
 
 
@@ -55,3 +56,11 @@ class EndStepResult:
     total_energy_j: np.ndarray
     energy_virtual_queue_j: np.ndarray
     epoch_done: bool
+    scheduling_duration_s: float  # 名义调度时隙长度，不随实际完成时刻延长。
+    # 本时隙尚未通过 pop_member_rewards 领取的完成奖励，含末尾任务。
+    member_rewards: dict[TaskKey, float] = field(default_factory=dict)
+
+    @property
+    def master_reward(self) -> float:
+        """完成全部 DAG 调度后读取：所有 Master 共享的归一化负平均时延。"""
+        return MasterReward(self.scheduling_duration_s).compute(self.slot_result)

@@ -18,6 +18,7 @@ from env.runtime.dag_runtime import DAGRuntime
 from env.runtime.server_queue import ComputeRecord, ServerState
 from env.runtime.slot_result import DAGResult, MemberEnergyResult, SlotResult
 from env.runtime.task_runtime import TaskRuntime, TaskStatus, TransferRecord
+from env.step.reward import MemberReward
 from env.types import DirectedChannelKey, EntityKind, EntityRef, TaskKey
 
 
@@ -61,6 +62,10 @@ class SchedulingRuntime:
         self._slot_start = float(slot_start)
         duration = float(max_duration_s if max_duration_s is not None else EnvConfig.default().scheduling_duration_s)
         self._deadline = self._slot_start + duration
+        self._member_reward = MemberReward(duration)
+        self._member_rewards: dict[TaskKey, float] = {}
+        self._managed_dags: dict[int, int] = defaultdict(int)
+        self._unfinished_dags: dict[int, int] = defaultdict(int)
         self._closed = False
         self._result: SlotResult | None = None
         # 环境接收事件增量以更新队列；独立运行时也保留逐 Member 结算明细。
@@ -123,7 +128,7 @@ class SchedulingRuntime:
         return tuple(sorted(self._ready_members))
 
     def register_dags(self, requests: Iterable[DAGRequest]) -> tuple[TaskKey, ...]:
-        """登记窗口工作负载，不确定位置、不发送数据、不预占资源。"""
+        """在首次决策前登记本窗口全部 DAG，固定各 Member 管理总数。"""
         keys = []
         for request in sorted(requests, key=lambda item: item.key):
             self._requests[request.key] = request
@@ -139,6 +144,8 @@ class SchedulingRuntime:
                     predecessors=predecessors[key],
                 )
             member_id = request.owner_member.index
+            self._managed_dags[member_id] += 1
+            self._unfinished_dags[member_id] += 1
             self._remaining_tasks[member_id] += len(node_keys)
             if node_keys and member_id not in self.active_tasks:
                 self._ready_members.add(member_id)
@@ -156,6 +163,9 @@ class SchedulingRuntime:
             request = self._requests[key.owner_member_id, key.user_id, key.dag_id]
             task.execution_node = placements[key].execution_node
             task.decision_at = self.now
+            # 观测与本批提交之间不推进时间，完成事件也在整批提交后处理。
+            task.unfinished_dags_at_decision = self._unfinished_dags[key.owner_member_id]
+            task.managed_dag_count = self._managed_dags[key.owner_member_id]
             task.status = TaskStatus.WAITING_DATA
             self.active_tasks[key.owner_member_id] = key
             self._ready_members.remove(key.owner_member_id)
@@ -287,6 +297,12 @@ class SchedulingRuntime:
     def trace(self, task_key: TaskKey) -> TaskRuntime:
         return self.tasks[task_key]
 
+    def pop_member_rewards(self) -> dict[TaskKey, float]:
+        """领取自上次领取以来实际完成的任务奖励；每条奖励仅返回一次。"""
+        rewards = self._member_rewards
+        self._member_rewards = {}
+        return rewards
+
     def channel_state(self, key: DirectedChannelKey) -> DirectedChannelState:
         return self.channels[key]
 
@@ -390,8 +406,12 @@ class SchedulingRuntime:
         task = self.tasks[record.task_key]
         task.mark_compute_finished(at)
         dag_key = (task.key.owner_member_id, task.key.user_id, task.key.dag_id)
-        self.dag_runtimes[dag_key].mark_finished(task.key.node_id, at)
+        dag = self.dag_runtimes[dag_key]
+        dag.mark_finished(task.key.node_id, at)
         member_id = task.key.owner_member_id
+        if dag.is_finished:
+            self._unfinished_dags[member_id] -= 1
+        self._member_rewards[task.key] = self._member_reward.compute(task)
         del self.active_tasks[member_id]
         self._remaining_tasks[member_id] -= 1
         if self._remaining_tasks[member_id]:

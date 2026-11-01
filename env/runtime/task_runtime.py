@@ -43,6 +43,8 @@ class TaskRuntime:
     execution_core_id: int | None = None
     compute_energy_j: float = 0.0
     failed_at: float | None = None
+    unfinished_dags_at_decision: int | None = None
+    managed_dag_count: int | None = None
 
     def mark_input_arrived(self, at: float) -> bool:
         self.input_arrival_at = float(at)
