@@ -57,7 +57,8 @@ class ChannelModel:
             1.0 if link_type is LinkType.AIR_TO_AIR
             else self._los_probability(elevation_angle_deg)
         )
-        los_gain = self.config.reference_channel_gain / distance_m**2
+        # 重合位置仍使用有限的高速率；距离平方下限为 1e-12 m²。
+        los_gain = self.config.reference_channel_gain / max(distance_m**2, 1e-12)
         nlos_gain = self.config.nlos_attenuation_factor * los_gain
         average_channel_gain = los_probability * los_gain + (1.0 - los_probability) * nlos_gain
         bandwidth_hz = (

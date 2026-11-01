@@ -5,7 +5,7 @@
 total_mhz = 12.0
 
 [propagation]
-# 1 m 处的参考信道增益；当前简化模型使用 gain = g0 / d^2。
+# 1 m 处的参考信道增益；gain = g0 / max(d^2, 1e-12)，距离单位 m。
 reference_channel_gain = 1e-6
 # NLoS 相对 LoS 的增益衰减系数，必须位于 (0, 1]。
 nlos_attenuation_factor = 0.2

@@ -24,6 +24,17 @@ class TestChannelModel(unittest.TestCase):
                                           1., LinkType.AIR_TO_AIR, 4e6)
         self.assertAlmostEqual(third.rate_bps, full.rate_bps / 3.)
 
+    def test_coincident_members_have_finite_rate_and_positive_delay(self):
+        position = (0., 0., 50.)
+        metrics = self.model.calculate_link(position, position, 1., LinkType.AIR_TO_AIR)
+        delay = self.model.transmission_delay_s(500_000., position, position, 1., LinkType.AIR_TO_AIR)
+        self.assertEqual(metrics.distance_m, 0.)
+        self.assertTrue(math.isfinite(metrics.rate_bps))
+        self.assertGreater(delay, 0.)
+        self.assertLess(delay, .001)
+        shared = self.model.calculate_link(position, position, 1., LinkType.AIR_TO_AIR, 1e6)
+        self.assertLess(shared.rate_bps, metrics.rate_bps)
+
     def test_rate_uses_noise_spectral_density_times_allocated_bandwidth(self):
         model = ChannelModel(replace(self.config, noise_density_w_per_hz=1e-17))
         self.assertAlmostEqual(model.rate_bps(4e-11, 1., 4e6), 4e6)

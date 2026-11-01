@@ -62,6 +62,21 @@ class TestSharedCommunication(unittest.TestCase):
         self.assertAlmostEqual(sum(r.tx_energy_j for r in (rb, rc, rd)), 9.)
         self.assertAlmostEqual(runtime.finish_slot().tx_energy_j, 9.)
 
+    def test_coincident_member_transfer_finishes_and_releases_bandwidth(self):
+        self.runtime.update_entity_positions({self.b: self.runtime.entity_positions[self.a]})
+        fast_record, (fast,) = self.send(self.a, (self.b,), 500_000.)
+        _, (slow,) = self.send(self.a, (self.c,), 24e6)
+        finish = fast.predicted_finish_at
+        self.assertTrue(math.isfinite(finish))
+        self.assertGreater(finish, self.runtime.now)
+        self.runtime.advance_until(finish)
+        self.assertEqual(fast.status, TransferStatus.FINISHED)
+        self.assertEqual(fast_record.finish_at, finish)
+        self.assertEqual(fast.remaining_bits, 0.)
+        self.assertEqual(slow.bandwidth_hz, 12e6)
+        self.assertEqual(slow.power_w, 3.)
+        self.assertAlmostEqual(fast.tx_energy_j, 1.5 * finish)
+
     def test_global_bandwidth_but_power_belongs_to_each_sender(self):
         _, (ab,) = self.send(self.a, (self.b,), 24e6)
         _, (ac,) = self.send(self.a, (self.c,), 24e6)
