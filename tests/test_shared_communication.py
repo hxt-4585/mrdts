@@ -32,8 +32,10 @@ class TestSharedCommunication(unittest.TestCase):
 
     def send(self, source, targets, bits):
         # 精确控制到达时刻，复用真实路由提交及事件执行路径。
-        dag = request(source, source, dag_id=len(self.runtime.tasks), cycles=(100.,))
-        key = self.runtime.register_dags([dag])[0]
+        dag = request(source, source, dag_id=len(self.runtime.tasks), inputs=(0., 0.),
+                      cycles=(100., 100.), edges=((0, 1),), sizes=(1.,))
+        # 仅测试输入传输；尚未到达的前驱结果使任务不进入计算。
+        key = self.runtime.register_dags([dag])[1]
         self.runtime._ready_members.clear()
         task = self.runtime.trace(key)
         task.execution_node = targets[-1]
@@ -102,17 +104,17 @@ class TestSharedCommunication(unittest.TestCase):
         self.assertIsNotNone(first.finish_at)
         self.assertIsNotNone(second.finish_at)
 
-    def test_cutoff_settles_partial_progress_once(self):
+    def test_finish_settles_full_transfer_beyond_nominal_boundary_once(self):
         self.runtime._deadline = 1.5
         record, (job,) = self.send(self.a, (self.b,), 24e6)
         self.runtime.advance_until(1.)
         self.assertEqual(record.tx_energy_j, 3.)
         result = self.runtime.finish_slot()
-        self.assertEqual(job.remaining_bits, 6e6)
-        self.assertEqual(job.tx_energy_j, 4.5)
-        self.assertIsNone(job.finish_at)
-        self.assertIsNone(record.finish_at)
-        self.assertEqual(result.tx_energy_j, 4.5)
+        self.assertEqual(job.remaining_bits, 0.)
+        self.assertEqual(job.tx_energy_j, 6.)
+        self.assertEqual(job.finish_at, 2.)
+        self.assertEqual(record.finish_at, 2.)
+        self.assertEqual(result.tx_energy_j, 6.)
         self.assertIs(result, self.runtime.finish_slot())
 
     def test_simultaneous_finish_at_deadline_counts_both(self):

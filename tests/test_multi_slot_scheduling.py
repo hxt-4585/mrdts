@@ -71,7 +71,7 @@ class TestMultiSlotScheduling(unittest.TestCase):
             self.assertEqual(set(self.runtime.tasks), set(slot_task_keys))
             self.assertEqual(len(self.runtime.dag_runtimes), self.DAGS_PER_SLOT)
 
-    def test_unfinished_dag_does_not_occupy_next_slot_resources(self):
+    def test_overtime_dag_finishes_before_next_slot_resources_are_created(self):
         actions = np.zeros((self.members.member_uav_count, 2))
         self._start_slot(actions)
         ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
@@ -98,10 +98,13 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.assertFalse(previous_runtime.servers[ground].queue)
         self.assertTrue(all(previous_runtime.trace(key).status is TaskStatus.UNSCHEDULED for key in keys[1:]))
 
+        self.assertEqual(self.runtime.advance_to_decision(), (owner.index,))
+        run_online_schedule(self.runtime, {owner: keys[1:]}, lambda key: PlacementDecision(ground))
         result = self.environment.end_step().slot_result
-        self.assertEqual(result.failed_dags, ((owner.index, ground.index, 0),))
+        self.assertFalse(result.failed_dags)
+        self.assertEqual(result.finished_dags, (request.key,))
         self.assertTrue(previous_runtime.closed)
-        self.assertTrue(all(task.status is TaskStatus.FAILED for task in previous_runtime.tasks.values()))
+        self.assertTrue(all(task.status is TaskStatus.FINISHED for task in previous_runtime.tasks.values()))
 
         self._start_slot(actions)
         self._assert_empty_scheduling_state()
@@ -114,12 +117,12 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.environment.end_step().slot_result
         task = self.runtime.trace(keys[0])
         self.assertEqual(task.status, TaskStatus.FINISHED)
-        self.assertEqual(task.compute_start_at, self.max_duration_s)
+        self.assertEqual(task.compute_start_at, result.slot_end)
         self.assertAlmostEqual(
             task.compute_finish_at,
-            self.max_duration_s + 1e7 / self.users.config.core_frequency,
+            result.slot_end + 1e7 / self.users.config.core_frequency,
         )
-        self.assertFalse(next(iter(previous_runtime.dag_runtimes.values())).is_finished)
+        self.assertTrue(next(iter(previous_runtime.dag_runtimes.values())).is_finished)
 
     def _start_slot(self, actions):
         with patch.object(self.environment, "_generate_dag_requests", return_value=()):

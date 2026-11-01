@@ -25,7 +25,7 @@ uv run python methods/random/run.py
 uv run python methods/random/run.py --episodes 1 --seed 42
 ```
 
-运行参数默认读取 `config/methods/random.toml`，每回合步数读取 `config/env.toml` 的 `steps_per_epoch`（默认 500）。结果写入 `results/random/seed_<seed>/` 下的独立运行目录，包含配置、运行元数据、逐步/逐 DAG 指标及汇总。时延不含飞行阶段；失败 DAG 在截断平均时延中按调度窗口长度计入。
+运行参数默认读取 `config/methods/random.toml`，每回合步数读取 `config/env.toml` 的 `steps_per_epoch`（默认 500）。结果写入 `results/random/seed_<seed>/` 下的独立运行目录，包含配置、运行元数据、逐步/逐 DAG 指标及汇总。时延为实际完成时刻减去本轮起点，不含飞行阶段；任务允许超过名义调度时隙，当前不统计超时。
 
 ## 环境检查与可视化
 
@@ -46,7 +46,7 @@ uv run python scripts/visualize_scheduling.py
 
 `config/channel.toml` 的 `[bandwidth].total_mhz` 配置全网总带宽（默认 12 MHz）；`[propagation].noise_density_w_per_hz` 配置等效噪声谱密度（默认 `2.5e-20 W/Hz`，由旧噪声功率 `1e-13 W` 在 4 MHz 下换算）。原三类独立带宽和固定噪声功率字段已移除。设备总功率预算分别使用 `config/uav.toml` 的 `[member].transmit_power`、`[bs].transmit_power` 和 `config/user.toml` 的 `[population].transmit_power`。
 
-每次活动传输变化时重新分配资源，先按旧速率和功率结算剩余数据与发送能耗，再更新完成时间预测。同一有向信道保持 FIFO，多跳仅在上一跳完成后激活。`TransferJob.predicted_finish_at` 表示预计完成，`finish_at` 仅在真实完成时填写；窗口截止不补算未发送的数据。窗口能耗统计仍只包含 Member UAV。ERS 使用独占资源参考时延排序，实际执行时长由运行时资源竞争决定。
+每次活动传输变化时重新分配资源，先按旧速率和功率结算剩余数据与发送能耗，再更新完成时间预测。同一有向信道保持 FIFO，多跳仅在上一跳完成后激活。`TransferJob.predicted_finish_at` 表示预计完成，`finish_at` 仅在真实完成时填写；名义窗口边界不截断传输或计算，所有任务继续执行至完成。窗口能耗统计仍只包含 Member UAV。ERS 使用独占资源参考时延排序，实际执行时长由运行时资源竞争决定。
 
 ```powershell
 uv run python -B -m unittest discover -s tests

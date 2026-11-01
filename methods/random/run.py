@@ -126,7 +126,7 @@ def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='re
     write_json(output / 'config.json', dict(
         method='random', ordering='ers', seed=seed, episodes=episodes,
         environment={name: asdict(value) for name, value in settings.items()},
-        delay_definition='completion_time - slot_start; unfinished DAGs capped at scheduling window',
+        delay_definition='completion_time - slot_start; execution continues beyond nominal scheduling duration',
     ))
     metadata = dict(status='running', started_at=datetime.now(timezone.utc).isoformat(),
                     method='random', seed=seed, branch=git_output('branch', '--show-current'),

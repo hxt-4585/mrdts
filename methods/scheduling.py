@@ -12,7 +12,7 @@ def run_online_schedule(
     member_orders: Mapping[EntityRef, Sequence[TaskKey]],
     choose_placement: Callable[[TaskKey], PlacementDecision],
 ) -> None:
-    """对已登记的 DAG 按 Member 序列逐次观测/决策，直到完成或截止。
+    """对已登记的 DAG 按 Member 序列逐次观测/决策，直到全部完成（允许超过名义时隙）。
 
     choose_placement 可在调用时读取当前观测；同批选择全部结束后才提交，
     确保多个同时可决策 Member 面对同一个环境时刻和资源状态。

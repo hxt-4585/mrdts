@@ -30,7 +30,7 @@ class SlotResult:
 
     @property
     def finished_dags(self) -> tuple[tuple[int, int, int], ...]:
-        return tuple(dag.key for dag in self.dags if not dag.failed)
+        return tuple(dag.key for dag in self.dags if dag.completion_time is not None and not dag.failed)
 
     @property
     def failed_dags(self) -> tuple[tuple[int, int, int], ...]:

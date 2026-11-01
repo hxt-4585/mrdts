@@ -63,25 +63,25 @@ class TestEnvScheduling(unittest.TestCase):
                 self.assertIs(runtime.trace(dag.task_keys[index]).status, TaskStatus.FINISHED)
                 self.assertIsNone(runtime.trace(dag.task_keys[index + 1]).decision_at)
 
-    def test_deadline_returns_no_decisions_and_keeps_settlement_available(self):
-        for cycles, finished in ((10., True), (20., False)):
+    def test_decisions_continue_at_and_beyond_nominal_boundary(self):
+        for cycles in (10., 20.):
             with self.subTest(cycles=cycles):
                 environment, runtime, members, grounds, bs = self.make_environment(duration=1.)
                 dag = request(members[0], grounds[0], inputs=(0., 0.), cycles=(cycles, 10.))
                 runtime.register_dags([dag])
-
                 ready = environment.submit_schedule({dag.task_keys[0]: PlacementDecision(bs)})
-
-                self.assertEqual(ready, ())
-                self.assertEqual(runtime.now, 1.)
-                self.assertTrue(runtime.closed)
-                self.assertIs(runtime.trace(dag.task_keys[0]).status,
-                              TaskStatus.FINISHED if finished else TaskStatus.FAILED)
-                self.assertIs(runtime.trace(dag.task_keys[1]).status, TaskStatus.FAILED)
-                self.assertIsNone(runtime.trace(dag.task_keys[1]).decision_at)
+                self.assertEqual(ready, (0,))
+                self.assertEqual(runtime.now, cycles / 10.)
+                self.assertFalse(runtime.closed)
+                self.assertIs(runtime.trace(dag.task_keys[0]).status, TaskStatus.FINISHED)
+                self.assertIs(runtime.trace(dag.task_keys[1]).status, TaskStatus.UNSCHEDULED)
+                self.assertEqual(environment.submit_schedule(
+                    {dag.task_keys[1]: PlacementDecision(bs)}), ())
                 result = runtime.finish_slot()
-                self.assertEqual(result.failed_dags, (dag.key,))
-                self.assertEqual(result.compute_energy_j, 0.)  # BS 仍计算，但不统计能耗。
+                self.assertEqual(result.finished_dags, (dag.key,))
+                self.assertFalse(result.failed_dags)
+                self.assertEqual(result.slot_end, cycles / 10. + 1.)
+                self.assertEqual(result.compute_energy_j, 0.)
                 self.assertIs(result, runtime.finish_slot())
                 self.assertEqual(environment.step_index, 0)
 

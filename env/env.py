@@ -142,9 +142,9 @@ class MRDTSEnv:
         return self._runtime.advance_to_decision()
 
     def end_step(self) -> EndStepResult:
-        """每步调用一次：截止结算后扣除一次预算，返回快照并推进步数。
+        """每步调用一次：完成执行并结算后扣除一次预算，返回快照并推进步数。
 
-        已完成作业和飞行能耗已入账，finish_slot 仅补计未完成作业及剩余悬停。
+        已完成作业和飞行能耗已入账，finish_slot 执行剩余已提交作业并补计悬停。
         调度时钟不含飞行阶段；奖励由后续确定的奖励模型计算。
         """
         slot_result = self._runtime.finish_slot()

@@ -1,4 +1,4 @@
-"""验证按事件入账、逐跳归属及截止部分结算。"""
+"""验证按事件入账、逐跳归属及超出名义时隙后的完整结算。"""
 
 import unittest
 
@@ -81,7 +81,7 @@ class TestEnergyAccounting(unittest.TestCase):
         self.assertAlmostEqual(runtime.trace(key).input_record.tx_energy_j, 2.)
         self.assertAlmostEqual(result.tx_energy_j, 7.)  # BS 下发第一跳不计，Member 转发计 1J。
 
-    def test_deadline_counts_partial_work_once_and_ignores_unstarted_work(self):
+    def test_full_computation_includes_work_queued_past_nominal_boundary(self):
         runtime, members, grounds, bs = self.make_runtime(duration=2.)
         dags = [
             request(members[0], grounds[0], inputs=(1.,), cycles=(10.,)),
@@ -96,23 +96,23 @@ class TestEnergyAccounting(unittest.TestCase):
         result = runtime.finish_slot()
         # 用户上传 1s 不计能耗；Member 0 转发恰好在截止完成，记 1J。
         self.assertAlmostEqual(result.tx_energy_j, 1.)
-        # Member 1 执行 2/5，Member 3 恰好完成；等待核心的任务为 0。
-        self.assertAlmostEqual(result.compute_energy_j, 40.)
-        np.testing.assert_allclose(self.queue, [5., 24., 4., 24.])
+        # Member 1 完成 50+10 cycles，Member 3 完成 20 cycles。
+        self.assertAlmostEqual(result.compute_energy_j, 80.)
+        np.testing.assert_allclose(self.queue, [13., 72., 12., 32.])
         snapshot = self.queue.copy()
         self.assertIs(result, runtime.finish_slot())
         np.testing.assert_array_equal(self.queue, snapshot)
 
-    def test_deadline_charges_only_elapsed_part_of_member_transmission(self):
+    def test_full_transmission_is_charged_beyond_nominal_boundary(self):
         runtime, members, grounds, bs = self.make_runtime(duration=3.)
         dag = request(members[0], grounds[0], inputs=(2.,), cycles=(10.,))
         key = runtime.register_dags([dag])[0]
         runtime.submit_placements({key: PlacementDecision(bs)})
         runtime.advance_to_decision()
         result = runtime.finish_slot()
-        self.assertAlmostEqual(result.tx_energy_j, 1.)
+        self.assertAlmostEqual(result.tx_energy_j, 2.)
         self.assertEqual(result.compute_energy_j, 0.)
-        np.testing.assert_allclose(self.queue, [7., 6., 6., 6.])
+        np.testing.assert_allclose(self.queue, [12., 10., 10., 10.])
 
 
 if __name__ == '__main__':

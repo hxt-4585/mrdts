@@ -165,7 +165,7 @@ class TestSerialRuntime(unittest.TestCase):
         self.assertEqual([t.compute_start_at for t in traces], [0., 0., 1., 2.])
         self.assertEqual([t.execution_core_id for t in traces], [0, 1, 1, 1])
 
-    def test_deadline_closes_unscheduled_waiting_queued_running_with_partial_energy(self):
+    def test_finish_drains_submitted_work_without_failing_unscheduled_tasks(self):
         self.runtime, self.members, self.grounds, self.bs = make_runtime(duration=1.)
         dags = [request(self.members[0], self.grounds[0], inputs=(0., 0.), cycles=(20., 10.)),
                 request(self.members[1], self.grounds[1]),
@@ -175,15 +175,38 @@ class TestSerialRuntime(unittest.TestCase):
         self.runtime.submit_placements({d.task_keys[0]: PlacementDecision(
             self.members[3] if i == 3 else self.bs) for i, d in enumerate(dags)})
         result = self.runtime.finish_slot()
-        self.assertEqual(len(result.finished_dags), 1)
-        self.assertEqual(len(result.failed_dags), 3)
+        self.assertEqual(len(result.finished_dags), 3)
+        self.assertEqual(len(result.failed_dags), 0)
+        self.assertIsNone(result.dags[0].completion_time)
+        self.assertIs(self.runtime.trace(dags[0].task_keys[1]).status, TaskStatus.UNSCHEDULED)
         self.assertEqual(self.runtime.trace(dags[3].task_keys[0]).compute_finish_at, 1.)
         self.assertIsNone(self.runtime.trace(dags[0].task_keys[1]).decision_at)
         self.assertAlmostEqual(result.compute_energy_j, 10.)  # 仅 Member 3，排除 BS。
-        self.assertAlmostEqual(result.tx_energy_j, 0.)  # 截止前只有用户上传。
+        self.assertAlmostEqual(result.tx_energy_j, 10.)  # 完整 Member 转发。
         self.assertFalse(self.runtime.active_tasks)
         self.assertEqual(self.runtime.ready_member_ids, ())
         self.assertIs(result, self.runtime.finish_slot())
+
+    def test_online_schedule_finishes_dependency_chain_beyond_nominal_slot(self):
+        from methods.scheduling import run_online_schedule
+
+        runtime, members, grounds, bs = make_runtime(duration=1.)
+        dag = request(members[0], grounds[0], inputs=(0., 0.), cycles=(20., 10.),
+                      edges=((0, 1),), sizes=(2.,))
+        parent, child = runtime.register_dags([dag])
+        run_online_schedule(runtime, {members[0]: (parent, child)},
+                            lambda key: PlacementDecision(members[0] if key == parent else bs))
+        result = runtime.finish_slot()
+        self.assertEqual(runtime.trace(parent).compute_finish_at, 2.)
+        self.assertEqual(runtime.trace(child).decision_at, 2.)
+        self.assertAlmostEqual(runtime.trace(child).compute_finish_at, 5.)
+        self.assertEqual(result.finished_dags, (dag.key,))
+        self.assertFalse(result.failed_dags)
+        self.assertAlmostEqual(result.dags[0].completion_time, 5.)
+        self.assertAlmostEqual(result.slot_end, 5.)
+        self.assertAlmostEqual(result.compute_energy_j, 20.)
+        self.assertAlmostEqual(result.tx_energy_j, 2.)
+        self.assertTrue(all(runtime.trace(key).failed_at is None for key in (parent, child)))
 
     def test_simultaneous_completions_and_zero_duration_settle_before_observation(self):
         self.runtime, self.members, self.grounds, self.bs = make_runtime(cores=2)

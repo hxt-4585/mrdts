@@ -48,7 +48,7 @@ class TestEndStep(unittest.TestCase):
                                    members.energy_virtual_queue_j[0] / members.config.member_slot_energy)
         runtime = env._runtime
         result = env.end_step()
-        self.assertEqual(len(result.slot_result.failed_dags), env.users.num_users)
+        self.assertEqual(len(result.slot_result.failed_dags), 0)
         np.testing.assert_allclose(result.flight_energy_j, expected_flight)
         np.testing.assert_allclose(result.hover_energy_j, hover_power * 2.)
         np.testing.assert_array_equal(result.compute_energy_j, 0.)
@@ -109,7 +109,7 @@ class TestEndStep(unittest.TestCase):
         np.testing.assert_array_equal(result.energy_virtual_queue_j, 0.)
         np.testing.assert_allclose(result.total_energy_j, after_flight + 2. * hover_power + expected_compute)
 
-    def test_auto_closed_runtime_partial_energy_is_not_added_twice(self):
+    def test_overtime_completion_energy_is_not_added_twice(self):
         env = self.make_environment(duration=1.)
         count = env.members.member_uav_count
         owner = EntityRef(EntityKind.MEMBER_UAV, 0)
@@ -120,10 +120,10 @@ class TestEndStep(unittest.TestCase):
         with patch.object(env, "_generate_dag_requests", return_value=(dag,)):
             env.begin_step(np.zeros((count, 2)))
         self.assertEqual(env.submit_schedule({dag.task_keys[0]: PlacementDecision(executor)}), ())
-        self.assertTrue(env._runtime.closed)
+        self.assertFalse(env._runtime.closed)
         before = env.members.energy_virtual_queue_j.copy()
         result = env.end_step()
-        self.assertAlmostEqual(result.compute_energy_j[1], env.members.config.member_capacitance_factor * frequency**3)
+        self.assertAlmostEqual(result.compute_energy_j[1], 2. * env.members.config.member_capacitance_factor * frequency**3)
         np.testing.assert_allclose(result.energy_virtual_queue_j, np.maximum(0., before - 145.))
 
 

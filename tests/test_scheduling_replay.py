@@ -1,4 +1,4 @@
-"""可视化必须保留真实路由、并发区间与截止失败语义。"""
+"""可视化必须保留真实路由、并发区间与完整执行时间。"""
 
 import importlib.util
 import unittest
@@ -72,22 +72,16 @@ class TestSchedulingReplay(unittest.TestCase):
                         for child, cost in task["average_edge_comm_s"].items()), default=0.)
             self.assertAlmostEqual(task["rank_s"], task["average_compute_s"] + tail)
 
-    def test_overload_does_not_report_planned_completion_as_actual_completion(self):
+    def test_overload_replay_includes_full_execution_beyond_nominal_boundary(self):
         data = self.build(load_scale=10000.0)
-        deadline = data["meta"]["deadline"]
-        self.assertGreater(data["summary"]["failed_dags"], 0)
-        truncated = [x for x in data["transfers"] if x["start"] is not None and not x["completed"]]
-        self.assertTrue(truncated)
-        for x in truncated:
-            self.assertIsNone(x["finish"])
-            self.assertEqual(x["display_end"], deadline)
-            self.assertFalse(any(e["kind"] == "transfer_finish" and e.get("transfer") == x["id"]
-                                 for e in data["events"]))
-        self.assertTrue(all(e["at"] <= deadline for e in data["events"]))
-        unscheduled = [t for t in data['tasks'] if t['decision_at'] is None]
-        self.assertTrue(unscheduled)
-        self.assertTrue(all(t['execution'] is None for t in unscheduled))
-        self.assertTrue(any(t["failed_at"] == deadline for t in data["tasks"]))
+        self.assertEqual(data["summary"]["failed_dags"], 0)
+        self.assertEqual(data["summary"]["finished_dags"], len(data["dags"]))
+        self.assertGreater(data["meta"]["slot_end"], data["meta"]["deadline"])
+        self.assertTrue(all(x["completed"] for x in data["transfers"]))
+        self.assertTrue(all(t["finish"] is not None and t["failed_at"] is None
+                            for t in data["tasks"]))
+        self.assertTrue(all(e["at"] <= data["meta"]["slot_end"] for e in data["events"]))
+        self.assertTrue(any(e["at"] > data["meta"]["deadline"] for e in data["events"]))
         self.assertAlmostEqual(sum(x["energy_j"] for x in data["transfers"]),
                                data["summary"]["tx_energy_j"])
 

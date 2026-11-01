@@ -1,4 +1,4 @@
-"""单个时隙内多 DAG 传输与计算的离散事件运行时。"""
+"""单轮多 DAG 传输与计算的离散事件运行时；执行不受名义时隙长度限制。"""
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -110,6 +110,7 @@ class SchedulingRuntime:
 
     @property
     def deadline(self) -> float:
+        """名义时隙边界，仅作时间参考，不截断执行。"""
         return self._deadline
 
     @property
@@ -186,24 +187,20 @@ class SchedulingRuntime:
         return self._append_route(hops, task, bits, is_input=is_input, predecessor=predecessor)
 
     def advance_to_decision(self) -> tuple[int, ...]:
-        """推进至最早的下一次决策机会、全部完成或窗口截止。"""
+        """推进至最早的下一次决策机会或全部已提交任务完成。"""
         while self._events and not self._ready_members and not self.closed:
             self.advance_until(self._events[0][0])
         return self.ready_member_ids
 
     def advance_until(self, absolute_time: float) -> tuple[int, ...]:
         """推进至给定上限；出现可决策 Member 时立即停下，不越过决策点。"""
-        limit = min(float(absolute_time), self.deadline)
+        limit = float(absolute_time)
         while not self.closed and not self._ready_members:
             if not self._events:
                 self._advance_clock(limit)
-                if limit == self.deadline:
-                    self._close_slot()
                 break
             timestamp = min(self._events[0][0], limit)
             self._process_events_until(timestamp)
-            if self.now == self.deadline:
-                self._close_slot()
             if timestamp == limit:
                 break
         return self.ready_member_ids
@@ -255,36 +252,21 @@ class SchedulingRuntime:
             self._record_member_energy(node, energy, 0)
 
     def finish_slot(self) -> SlotResult:
-        """截止结算；不再索取动作，尚未提交的任务也计入失败。"""
+        """完成已提交工作后结算；调用方应先完成全部任务的在线决策。
+
+        名义边界不限制执行。提前完成时结算至名义边界，超出时使用实际结束时刻。
+        """
         if not self.closed:
-            self._process_events_until(self.deadline)
+            while self._events:
+                self._process_events_until(self._events[0][0])
+            self._advance_clock(max(self.now, self.deadline))
             self._close_slot()
         return self._result
 
     def _close_slot(self) -> None:
-        # 传输进度和能耗已随时钟结算至截止；只补记未完成计算的部分。
-        for channel in self.channels.values():
-            job = channel.active
-            if job is not None:
-                job.bandwidth_hz = job.power_w = job.rate_bps = 0.0
-            channel.queued.clear()
-            channel.active = None
-        for server in self.servers.values():
-            for record in server.running.values():
-                elapsed = self.deadline - record.start_at
-                duration = record.finish_at - record.start_at
-                self._settle_compute_energy(server.node, record, record.energy_j * elapsed / duration)
-            server.queue.clear()
-            server.running.clear()
-        for task in self.tasks.values():
-            if task.status is not TaskStatus.FINISHED:
-                task.status = TaskStatus.FAILED
-                task.failed_at = self.deadline
-        for dag in self.dag_runtimes.values():
-            dag.mark_failed(self.deadline)
         self._result = SlotResult(
             slot_start=self.slot_start,
-            slot_end=self.deadline,
+            slot_end=self.now,
             dags=tuple(DAGResult(key, dag.completion_time, dag.failed_at is not None)
                        for key, dag in sorted(self.dag_runtimes.items())),
             compute_energy_j=sum(energy[0] for energy in self._member_energy.values()),
@@ -412,12 +394,10 @@ class SchedulingRuntime:
         member_id = task.key.owner_member_id
         del self.active_tasks[member_id]
         self._remaining_tasks[member_id] -= 1
-        if self._remaining_tasks[member_id] and at < self.deadline:
+        if self._remaining_tasks[member_id]:
             self._ready_members.add(member_id)
 
     def _dispatch(self, at: float) -> None:
-        if at >= self.deadline:
-            return
         for task_key in sorted(
             self._ready_for_server,
             key=lambda key: (self.tasks[key].data_ready_at, key),

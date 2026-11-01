@@ -78,15 +78,15 @@ class TestMemberEnergyObservation(unittest.TestCase):
         energy = self.observe_energy(dags[0].task_keys[1])
         np.testing.assert_allclose(energy[:3], [100., 0., 100.])
 
-    def test_full_prediction_does_not_change_partial_deadline_settlement(self):
+    def test_full_prediction_matches_full_execution_settlement(self):
         dag = request(self.members[0], self.grounds[0], inputs=(0., 0.), cycles=(100., 0.))
         self.runtime.register_dags([dag])
         self.runtime.submit_placements({dag.task_keys[0]: PlacementDecision(self.members[0])})
         self.assertAlmostEqual(self.observe_energy(dag.task_keys[1])[0], 200.)
         result = self.runtime.finish_slot()
-        self.assertEqual(result.compute_energy_j, 40.)
-        self.assertEqual(self.env.members.energy_virtual_queue_j[0], 140.)
-        self.assertAlmostEqual(self.observe_energy(dag.task_keys[1])[0], 140.)
+        self.assertEqual(result.compute_energy_j, 100.)
+        self.assertEqual(self.env.members.energy_virtual_queue_j[0], 200.)
+        self.assertAlmostEqual(self.observe_energy(dag.task_keys[1])[0], 200.)
 
 
 if __name__ == '__main__':

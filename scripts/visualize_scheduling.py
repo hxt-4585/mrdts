@@ -155,7 +155,7 @@ def build_replay(load_scale=1.0, initial_region=1):
         event(task.compute_start_at, "compute_start", region_id,
               f"{label} 开始计算 · {execution} / C{task.execution_core_id}", task=tid)
         event(task.compute_finish_at, "compute_finish", region_id, f"{label} 计算完成", task=tid)
-        event(task.failed_at, "task_failed", region_id, f"{label} 截止未完成，任务失败", task=tid)
+        event(task.failed_at, "task_failed", region_id, f"{label} 任务失败", task=tid)
         records = [(None, task.input_record), *sorted(task.predecessor_records.items())]
         request = request_by_key[key.owner_member_id, key.user_id, key.dag_id]
         for parent, record in records:
@@ -200,13 +200,13 @@ def build_replay(load_scale=1.0, initial_region=1):
         dag.update(completion=outcome.completion_time, failed=outcome.failed)
         event(0.0, "dag_submit", dag["region"], f"{dag['label']} 登记：各子任务等待在线卸载决策")
         event(outcome.completion_time, "dag_finish", dag["region"], f"{dag['label']} 全部子任务完成")
-    event(result.slot_end, "slot_close", 0, "时隙截止：未完成 DAG 失败，运行时关闭并释放")
+    event(result.slot_end, "slot_close", 0, "本轮任务执行完成，结算并释放运行时")
     # 同时刻事件作为一批展示；顺序仅用于可读性，不宣称是内核微观处理顺序。
     priority = {"dag_submit": 0, "transfer_finish": 1, "compute_finish": 1, "placement": 2,
                 "input_arrival": 3, "result_arrival": 3, "data_ready": 4,
                 "compute_start": 5, "transfer_start": 5, "dag_finish": 6, "slot_close": 9}
     events.sort(key=lambda e: (e["at"], priority.get(e["kind"], 8), e["region"], e["text"]))
-    return dict(meta=dict(slot_start=result.slot_start, deadline=result.slot_end,
+    return dict(meta=dict(slot_start=result.slot_start, deadline=runtime.deadline, slot_end=result.slot_end,
                           initial_region=initial_region, region_count=region.config.region_count,
                           load_scale=load_scale, flight_duration=members.env_config.flight_duration_s,
                           flight_violations=violations.tolist()),

@@ -2,11 +2,11 @@
 
 更新日期：2026-11-01。本文按当前代码整理；实现状态与文档不一致时，以代码为准。
 
-本项目是个人科研仿真代码，以理解算法、修改方案和复现实验为主。默认配置、输入数据和内部调用顺序正确；不添加类型、形状、有限值、范围、调用顺序或组件兼容性的防御性校验，也不另建统一校验层。保留计算所需的飞行边界、候选节点、前驱依赖、截止结算等模型逻辑。
+本项目是个人科研仿真代码，以理解算法、修改方案和复现实验为主。默认配置、输入数据和内部调用顺序正确；不添加类型、形状、有限值、范围、调用顺序或组件兼容性的防御性校验，也不另建统一校验层。保留计算所需的飞行边界、候选节点、前驱依赖、完整执行结算等模型逻辑。
 
 ## 当前状态
 
-环境已实现固定场景生成、epoch 重置、飞行与用户关联、DAG 生成、Master/Member 观测、事件调度、截止结算及能量虚拟队列更新。`env/step/reward.py` 已预留 `MasterReward.compute()` 和 `MemberReward.compute()`；公式尚未实现，调用会抛出 `NotImplementedError`，环境也尚未接入奖励调用或返回字段；不能把任务指标和能耗结算视为已经实现奖励。
+环境已实现固定场景生成、epoch 重置、飞行与用户关联、DAG 生成、Master/Member 观测、事件调度、完整执行结算及能量虚拟队列更新。`env/step/reward.py` 已预留 `MasterReward.compute()` 和 `MemberReward.compute()`；公式尚未实现，调用会抛出 `NotImplementedError`，环境也尚未接入奖励调用或返回字段；不能把任务指标和能耗结算视为已经实现奖励。
 
 `methods/random/run.py` 已提供 Random 基线评估入口，执行随机飞行、ERS 排序和逐次随机放置，输出时延、失败率与飞行违规统计。当前没有 PPO 或其他学习方法的训练入口。旧组件组合框架、统一实验入口及训练日志可视化工具已移除。
 
@@ -21,7 +21,7 @@
 | `env/entities/` | 区域、用户、UAV 与基站状态及资源 |
 | `env/workload/` | DAG 拓扑、计算量和数据量生成 |
 | `env/communication/` | 通信速率、链路和路由 |
-| `env/runtime/` | 事件推进、传输/计算队列、任务依赖与截止结算 |
+| `env/runtime/` | 事件推进、传输/计算队列、任务依赖与完整执行结算 |
 | `env/settings/`、`config/*.toml` | 公共物理环境、工作负载和环境生命周期配置 |
 | `methods/random/run.py` | Random 基线的评估、策略随机流和结果输出 |
 | `methods/random/ers.py` | ERS 排序实现 |
@@ -41,7 +41,7 @@ M 为全网 Member UAV 数量，不包含 BS。环境提供观测编码并限制
 2. 每个 epoch 调用 `reset(epoch_index=...)`，恢复 Member 初始位置、区域及数量，清零能量队列与步数，重建 DAG 随机流。
 3. 读取 `observe_master(master_id)`，构造 `(M, 2)` 飞行动作，调用 `begin_step(flight_actions)`。调用方保证飞行后有用户的区域仍有 Member。
 4. 根据返回的 DAG 请求和可决策 Member 选择前驱已完成的子任务，按需读取 `observe_member(task_key)`。同一时刻先完成全部观测和动作选择，再统一提交 `submit_schedule(placements)`。
-5. 重复上一步，直到返回的可决策 Member 元组为空，再调用一次 `end_step()` 完成截止结算。
+5. 重复上一步，直到返回的可决策 Member 元组为空，再调用一次 `end_step()` 完成完整执行结算。
 6. 根据 `EndStepResult.epoch_done` 判断是否结束本 epoch，否则继续下一步。返回结果包含 DAG 结果、逐 Member 能耗和能量队列快照，当前不包含奖励。
 
 `methods/scheduling.py` 提供的是直接使用 `SchedulingRuntime` 的循环；Random 和回放脚本当前各自通过 `MRDTSEnv.submit_schedule()` 实现循环。两者都保持每个 owner Member 至多一个活动子任务、同刻动作统一提交的语义。
@@ -54,7 +54,7 @@ M 为全网 Member UAV 数量，不包含 BS。环境提供观测编码并限制
 
 Random 的运行 seed 覆盖环境 `env_seed`，方法侧另按 seed 和 episode 派生飞行与放置随机流。当前评估每个 episode 以相同空间种子重建场景，再按 episode 调用 reset；每回合步数读取 `steps_per_epoch`。比较方法时应记录一致的场景参数、任务负载和环境种子。
 
-Random 默认将结果写入 `results/random/seed_<seed>/<时间戳与唯一后缀>/`，包括 `config.json`、`metadata.json`、`metrics.csv`、`dags.csv` 和成功完成后的 `summary.json`。成功 DAG 时延为 `completion_time - slot_start`；截断平均时延将失败 DAG 按调度窗口长度计入。上述统计指标不是强化学习奖励。
+Random 默认将结果写入 `results/random/seed_<seed>/<时间戳与唯一后缀>/`，包括 `config.json`、`metadata.json`、`metrics.csv`、`dags.csv` 和成功完成后的 `summary.json`。DAG 时延为 `completion_time - slot_start`，允许超过名义时隙，当前不统计超时；现有 `truncated_delay_s` 字段对正常完成 DAG 同样保存完整时延。上述统计指标不是强化学习奖励。
 
 ## 接手与验证
 

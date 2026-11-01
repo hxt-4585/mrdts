@@ -1,4 +1,4 @@
-"""真实环境时隙开始、截止结算和旧运行时隔离。"""
+"""真实环境时隙开始、完整结算和旧运行时隔离。"""
 
 import unittest
 from dataclasses import replace
@@ -19,7 +19,7 @@ class TestSlotLifecycle(unittest.TestCase):
         self.environment.generate_scene()
         self.environment.reset(epoch_index=0)
         self.region, self.users, self.members = self.environment.region, self.environment.users, self.environment.members
-        # 本组测试手工构造负载，以分别验证截止和资源隔离。
+        # 本组测试手工构造负载，以验证超时完成和资源隔离。
         workload = patch.object(self.environment, "_generate_dag_requests", return_value=())
         workload.start()
         self.addCleanup(workload.stop)
@@ -115,64 +115,64 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertEqual(self.environment._runtime.slot_start, 0.0)
         self.assertEqual(self.environment._runtime.deadline, 1.0)
 
-    def test_end_marks_unfinished_work_failed_and_next_slot_is_empty(self):
+    def test_overtime_dag_completes_and_next_slot_starts_after_actual_end(self):
+        from methods.scheduling import run_online_schedule
+
         runtime = self._begin()
         owner = runtime.ground_owner_members[self.ground]
-        request = DAGRequest(0, DAG(3, [], np.array([[1., 2e9], [1., 1e7], [1e6, 1e7]]), {}),
-                             owner, self.ground)
+        request = DAGRequest(0, DAG(3, [(0, 1), (1, 2)],
+                             np.array([[1., 2e9], [1., 1e7], [1., 1e7]]),
+                             {(0, 1): 1., (1, 2): 1.}), owner, self.ground)
         keys = runtime.register_dags([request])
-        runtime.submit_placements({keys[0]: PlacementDecision(self.ground)})
-        runtime.advance_until(0.5)
-        self.assertTrue(runtime.servers[self.ground].running)
-        self.assertTrue(all(runtime.trace(key).status.value == 'unscheduled' for key in keys[1:]))
+        run_online_schedule(runtime, {owner: keys}, lambda key: PlacementDecision(self.ground))
         result = self.environment.end_step().slot_result
         self.assertIsNone(self.environment._runtime)
         self.assertTrue(runtime.closed)
-        self.assertEqual(result.failed_dags, ((owner.index, 0, 0),))
-        self.assertEqual(result.finished_dags, ())
-        self.assertEqual(runtime.dag_runtimes[(owner.index, 0, 0)].failed_at, 1.0)
-        self.assertTrue(all(runtime.trace(key).status.value == "failed" for key in keys))
+        self.assertFalse(result.failed_dags)
+        self.assertEqual(result.finished_dags, (request.key,))
+        self.assertAlmostEqual(result.dags[0].completion_time, 2.02)
+        self.assertAlmostEqual(result.slot_end, 2.02)
+        self.assertTrue(all(runtime.trace(key).status.value == "finished" for key in keys))
         self.assertFalse(runtime.channels)
         self.assertTrue(all(not server.queue and not server.running for server in runtime.servers.values()))
-        self.assertAlmostEqual(result.tx_energy_j, 0.)
-
-        positions = self.members.positions.copy()
         new_runtime = self._begin()
         self.assertIsNot(new_runtime, runtime)
-        np.testing.assert_array_equal(self.members.positions, positions)
-        self.assertEqual(new_runtime.slot_start, 1.0)
-        self.assertEqual(new_runtime.now, 1.0)
+        self.assertEqual(new_runtime.slot_start, result.slot_end)
         self.assertFalse(new_runtime.tasks)
-        self.assertFalse(new_runtime.dag_runtimes)
         key = self._submit(new_runtime)
-        self.assertEqual(new_runtime.trace(key).decision_at, 1.)
         next_result = self.environment.end_step().slot_result
-        self.assertEqual(new_runtime.trace(key).compute_start_at, 1.0)
-        self.assertAlmostEqual(new_runtime.trace(key).compute_finish_at, 1.01)
+        self.assertEqual(new_runtime.trace(key).compute_start_at, result.slot_end)
+        self.assertAlmostEqual(new_runtime.trace(key).compute_finish_at, result.slot_end + .01)
         self.assertEqual(len(next_result.finished_dags), 1)
-        self.assertEqual(result.failed_dags, ((owner.index, 0, 0),))
 
-    def test_exact_deadline_completion_succeeds_without_starting_waiting_work(self):
+    def test_exact_boundary_completion_allows_next_decision(self):
         runtime = self._begin()
         finished = self._submit(runtime, dag_id=0, cycles=1e9)
         owner = runtime.ground_owner_members[self.ground]
         waiting = runtime.register_dags([DAGRequest(
             1, DAG(1, [], np.array([[0., 1e7]]), {}), owner, self.ground)])[0]
+        self.assertEqual(runtime.advance_to_decision(), (owner.index,))
+        self.assertEqual(runtime.now, 1.)
+        runtime.submit_placements({waiting: PlacementDecision(self.ground)})
         result = self.environment.end_step().slot_result
         self.assertEqual(runtime.trace(finished).compute_finish_at, 1.0)
-        self.assertIsNone(runtime.trace(waiting).compute_start_at)
-        self.assertEqual(len(result.finished_dags), 1)
-        self.assertEqual(len(result.failed_dags), 1)
+        self.assertEqual(runtime.trace(waiting).compute_start_at, 1.)
+        self.assertAlmostEqual(runtime.trace(waiting).compute_finish_at, 1.01)
+        self.assertEqual(len(result.finished_dags), 2)
+        self.assertFalse(result.failed_dags)
 
-    def test_advancing_to_deadline_closes_runtime_and_end_collects_same_result(self):
+    def test_advancing_to_nominal_boundary_does_not_close_runtime(self):
         runtime = self._begin()
+        key = self._submit(runtime, cycles=2e9)
         runtime.advance_until(runtime.deadline)
-        self.assertTrue(runtime.closed)
+        self.assertFalse(runtime.closed)
+        self.assertEqual(runtime.trace(key).status.value, "running")
         result = runtime.finish_slot()
+        self.assertEqual(runtime.trace(key).compute_finish_at, 2.)
         self.assertIs(self.environment.end_step().slot_result, result)
         self.assertIsNone(self.environment._runtime)
 
-    def test_partial_computation_energy_stops_at_deadline(self):
+    def test_computation_energy_covers_full_overtime_execution(self):
         runtime = self._begin()
         member = runtime.ground_owner_members[self.ground]
         key = self._submit(runtime, cycles=2e10, execution=member)
@@ -180,11 +180,12 @@ class TestSlotLifecycle(unittest.TestCase):
         task = runtime.trace(key)
         self.assertEqual(task.status.value, "running")
         frequency = runtime.servers[member].core_frequencies[task.execution_core_id]
-        expected = runtime.servers[member].capacitance_factor * frequency**3 * (1.0 - task.compute_start_at)
+        expected = runtime.servers[member].capacitance_factor * frequency**2 * task.cpu_cycles
         result = self.environment.end_step().slot_result
         self.assertAlmostEqual(task.compute_energy_j, expected)
         self.assertAlmostEqual(result.compute_energy_j, expected)
-        self.assertIsNone(task.compute_finish_at)
+        self.assertGreater(task.compute_finish_at, runtime.deadline)
+        self.assertFalse(result.failed_dags)
 
     def test_position_snapshot_is_independent_of_input_array(self):
         runtime = self._begin()
