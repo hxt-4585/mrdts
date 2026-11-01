@@ -155,7 +155,7 @@ Member UAV 的飞行阶段由 `config/env.toml` 的 `flight_duration_s` 配置�
 
 方法侧为当前可决策 Member 选择前驱已完成的子任务，先获取观测、决定执行位置，再统一调用 `submit_schedule(placements)`。环境推进到下一个决策时刻，处理完同一时刻的事件后返回可决策 Member 编号；返回空元组表示本窗口不再需要决策。每个 Member 同时最多拥有一个活动子任务，完成后才选择下一个子任务。
 
-`end_step()` 返回 `EndStepResult`，包含 DAG 结果、逐 Member 的计算、发送、飞行、悬停能耗、能量队列快照和 `epoch_done`。它结算截止前未完成作业的实际执行部分、补齐剩余悬停能耗，每架 Member 扣除一次时隙能量预算，更新步数及下一调度窗口起点，并释放环境持有的当前运行时。当前 `env/step/reward.py` 为空，`end_step()` 不调用奖励模型，`EndStepResult` 也没有奖励字段；`epoch_done` 表示步数达到 `steps_per_epoch`。
+`end_step()` 返回 `EndStepResult`，包含 DAG 结果、逐 Member 的计算、发送、飞行、悬停能耗、能量队列快照和 `epoch_done`。它结算截止前未完成作业的实际执行部分、补齐剩余悬停能耗，每架 Member 扣除一次时隙能量预算，更新步数及下一调度窗口起点，并释放环境持有的当前运行时。当前 `env/step/reward.py` 仅提供 `MasterReward`（全系统每时隙计算一次、所有 Master 共享）和 `MemberReward`（子任务级）的计算接口框架，公式尚未实现，`end_step()` 不调用奖励模型，`EndStepResult` 也没有奖励字段；`epoch_done` 表示步数达到 `steps_per_epoch`。
 
 计算完成时将计算能耗记入实际执行 Member 的队列；发送能耗按当前分配功率随调度时间推进累计，悬停能耗也随时间推进累计至当前观测时刻。窗口能耗只统计 Member UAV，BS 和用户的能耗不纳入该统计。未完成 DAG 在截止时失败，恰好截止完成的任务计入完成；核心、信道及任务队列不跨时隙保留。
 
