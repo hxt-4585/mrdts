@@ -1,51 +1,63 @@
-# 项目目录与后续实现约定
+# 项目目录与实现约定
 
-更新日期：2026-10-08。
+更新日期：2026-11-01。本文按当前代码整理；实现状态与文档不一致时，以代码为准。
 
-本项目是个人科研仿真代码，以理解算法、修改方案和复现实验为主。默认配置、输入数据和内部调用顺序正确；不添加类型、形状、有限值、范围、调用顺序或组件兼容性的防御性校验，也不另建统一校验层。保留计算所需的数据转换及飞行边界、候选节点、前驱依赖、截止结算等模型逻辑。正确性通过正常场景测试和实验复现检查。
+本项目是个人科研仿真代码，以理解算法、修改方案和复现实验为主。默认配置、输入数据和内部调用顺序正确；不添加类型、形状、有限值、范围、调用顺序或组件兼容性的防御性校验，也不另建统一校验层。保留计算所需的飞行边界、候选节点、前驱依赖、截止结算等模型逻辑。
 
 ## 当前状态
 
-旧 `experiments/` 和 `methods/` 中的框架实现已清理，包括统一入口、组件接口、组合器、注册工厂、方案适配器、共享学习层和 Random/PPO 实现。对应方法/实验配置和专属测试也已移除。目前没有完整方法的训练或评估入口，后续按需要重新实现。
+环境已实现固定场景生成、epoch 重置、飞行与用户关联、DAG 生成、Master/Member 观测、事件调度、截止结算及能量虚拟队列更新。`env/step/reward.py` 目前为空，尚无奖励公式、计算调用或返回字段；不能把任务指标和能耗结算视为已经实现奖励。
 
-环境、公共环境配置、诊断脚本和相关测试保留。训练日志可视化工具及其专属测试已移除。诊断所需 ERS 位于 `scripts/ers.py`，随机流工具位于 `scripts/randomness.py`；环境自身不依赖这两个工具。
+`methods/random/run.py` 已提供 Random 基线评估入口，执行随机飞行、ERS 排序和逐次随机放置，输出时延、失败率与飞行违规统计。当前没有 PPO 或其他学习方法的训练入口。旧组件组合框架、统一实验入口及训练日志可视化工具已移除。
 
-## 后续方法如何组织
+## 目录职责
 
-每个方法直接在 `methods/<方法名>/` 中完成实现。该目录包含运行入口、算法流程、参数，以及该方法需要的训练、网络、奖励、日志和评估代码。简单方法可以只用一个文件；较长时在同一目录按阅读需要拆分即可。无需建立跨方法共享接口、注册表、组件组合层或通用训练框架。
-
-不同方法之间允许复制相似逻辑，各自修改。排序、飞行和调度仍是算法流程中的步骤，但不要求抽象成可插拔组件。方法直接调用 `env` 的仿真能力。
-
-例如未来实现 Random 时，可以从 `methods/random/run.py` 开始；需要 PPO 时，再建立 `methods/ppo/`。这些仅是组织示例，当前未创建对应实现。算法参数、随机种子和运行预算放在各自方法目录中；物理环境参数继续使用 `config/*.toml`。
-
-## 保留目录的职责
-
-| 位置 | 内容 |
+| 位置 | 当前内容 |
 |---|---|
-| `env/env.py` | `MRDTSEnv` 的场景生成、重置、`begin_step/submit_schedule/end_step`、观测与能耗结算 |
-| `env/types.py`、`env/contracts.py` | 实体与任务标识、DAG 请求及放置决策 |
-| `env/entities/` | 区域、用户、UAV 与基站的状态及资源 |
+| `env/env.py` | `MRDTSEnv` 场景生成、重置、分阶段 step、观测调用与能耗结算 |
+| `env/step/observation.py` | Master 的 `(3M,)` 与 Member 的 `(6M+8,)` 观测及信息可见范围 |
+| `env/step/reward.py` | 奖励模块预留文件，当前为空、未接入 |
+| `env/types.py`、`env/contracts.py` | 实体和任务标识、DAG 请求、放置决策及 step 返回结构 |
+| `env/entities/` | 区域、用户、UAV 与基站状态及资源 |
 | `env/workload/` | DAG 拓扑、计算量和数据量生成 |
 | `env/communication/` | 通信速率、链路和路由 |
-| `env/runtime/` | 事件执行、传输/计算队列、任务依赖与截止结算 |
-| `env/settings/`、`config/*.toml` | 公共物理环境及工作负载参数 |
-| `methods/<方法名>/` | 该方法从运行到训练、评估的完整实现 |
-| `scripts/` | 环境诊断、回放和可视化脚本 |
-| `tests/` | 当前保留功能的回归验证 |
-| `specs/`、`docs/research/` | 模型定义与研究资料；历史建议不代表当前实现要求 |
+| `env/runtime/` | 事件推进、传输/计算队列、任务依赖与截止结算 |
+| `env/settings/`、`config/*.toml` | 公共物理环境、工作负载和环境生命周期配置 |
+| `methods/random/run.py` | Random 基线的评估、策略随机流和结果输出 |
+| `methods/random/ers.py` | ERS 排序实现 |
+| `methods/scheduling.py` | 基于底层 runtime 的在线策略调用循环 |
+| `config/methods/random.toml` | Random 运行种子、回合数和输出目录，可由命令行覆盖 |
+| `scripts/` | 环境检查、诊断可视化与调度回放；`ers.py` 仅重导出方法侧 ERS |
+| `tests/` | 环境、方法及诊断脚本的回归验证 |
+| `specs/` | 系统模型、参数与研究问题分析 |
 
-RL 的观测、奖励、网络及优化算法留在对应方法目录，不放进环境。正式方法不导入 `tests/` 或 `scripts/`；诊断实现可以作为参考按需复制进方法目录。
+M 为全网 Member UAV 数量，不包含 BS。环境提供观测编码并限制可见信息；方法负责任务排序、调用观测、选择飞行和执行位置动作，以及训练、网络、优化和评估。奖励当前仅在环境目录预留，具体公式与接口尚待实现，不再沿用“观测和奖励必须放在方法目录”的旧约定。
+
+每个方法优先在 `methods/<方法名>/` 中独立实现，允许不同方法之间复制相似逻辑。复用现有代码和数据结构，不要求建立组件注册表或通用训练框架。正式方法不导入 `tests/` 或 `scripts/`。
+
+## 环境调用顺序
+
+1. 用各配置对象构造 `MRDTSEnv(settings)`，调用 `generate_scene()` 生成场景。
+2. 每个 epoch 调用 `reset(epoch_index=...)`，恢复 Member 初始位置、区域及数量，清零能量队列与步数，重建 DAG 随机流。
+3. 读取 `observe_master(master_id)`，构造 `(M, 2)` 飞行动作，调用 `begin_step(flight_actions)`。调用方保证飞行后有用户的区域仍有 Member。
+4. 根据返回的 DAG 请求和可决策 Member 选择前驱已完成的子任务，按需读取 `observe_member(task_key)`。同一时刻先完成全部观测和动作选择，再统一提交 `submit_schedule(placements)`。
+5. 重复上一步，直到返回的可决策 Member 元组为空，再调用一次 `end_step()` 完成截止结算。
+6. 根据 `EndStepResult.epoch_done` 判断是否结束本 epoch，否则继续下一步。返回结果包含 DAG 结果、逐 Member 能耗和能量队列快照，当前不包含奖励。
+
+`methods/scheduling.py` 提供的是直接使用 `SchedulingRuntime` 的循环；Random 和回放脚本当前各自通过 `MRDTSEnv.submit_schedule()` 实现循环。两者都保持每个 owner Member 至多一个活动子任务、同刻动作统一提交的语义。
 
 ## 随机性与实验结果
 
-`Region`、`User` 接收外部 `rng`；`DAGGenerator` 接收 `rng` 与 `py_rng`。环境配置本身不设置 seed。诊断和测试使用 `scripts.randomness.RandomStreams(seed=42)`，保持原默认场景的随机序列；空间随机流固定，任务与策略随机流可按 episode 派生。
+`config/env.toml` 配置 `env_seed`、飞行时间、调度窗口长度及 `steps_per_epoch`。`generate_scene()` 从 `[env_seed, 0]` 派生区域和用户随机流；`reset(epoch_index=...)` 从 `[env_seed, epoch_index]` 派生 DAG 的 NumPy 与 Python 随机流。重置不重新生成区域和用户，同一 seed 与 epoch 可复现任务序列。
 
-后续方法自行管理随机种子、场景初始化、训练/验证/测试划分和输出路径。比较方法时明确并记录相同的场景参数、任务负载和种子。区域及用户位置跨回合固定、UAV 每回合恢复初始位置的实验设置，应由各方法入口明确实现。
+`Region`、`User` 和 `DAGGenerator` 仍接收外部随机流，由 `MRDTSEnv` 负责创建并传入。部分独立诊断和测试使用 `scripts.randomness.RandomStreams`（默认 seed 为 42）；环境自身不依赖该辅助模块。
 
-后续方法按需确定数据与输出位置，至少记录运行参数和种子；不预设统一数据目录、结果目录或日志可视化框架。
+Random 的运行 seed 覆盖环境 `env_seed`，方法侧另按 seed 和 episode 派生飞行与放置随机流。当前评估每个 episode 以相同空间种子重建场景，再按 episode 调用 reset；每回合步数读取 `steps_per_epoch`。比较方法时应记录一致的场景参数、任务负载和环境种子。
+
+Random 默认将结果写入 `results/random/seed_<seed>/<时间戳与唯一后缀>/`，包括 `config.json`、`metadata.json`、`metrics.csv`、`dags.csv` 和成功完成后的 `summary.json`。成功 DAG 时延为 `completion_time - slot_start`；截断平均时延将失败 DAG 按调度窗口长度计入。上述统计指标不是强化学习奖励。
 
 ## 接手与验证
 
 先阅读本文和根 README，再查看目标方法目录或环境文件。修改前检查 `git status` 和当前分支，保留已有工作区修改。目录职责变化时同步本文；不为每次修改另建计划、交接或完成报告。
 
-在项目根目录运行 `uv run python -B -m unittest discover -s tests`。安装、环境诊断及已有日志绘图命令见[根 README](../README.md)。
+在项目根目录运行 `uv run python -B -m unittest discover -s tests`。基线评估、环境诊断与回放命令见[根 README](../README.md)。

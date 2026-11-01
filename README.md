@@ -2,19 +2,30 @@
 
 多区域 UAV 的 DAG 子任务调度科研仿真项目。优先保证算法流程直观、便于阅读和修改；每种方法在一个目录内独立实现，允许不同方法之间重复代码。
 
-旧组件组合框架、Random/PPO 实现、统一实验入口和训练日志可视化工具已移除。目前保留环境、诊断脚本和测试，没有完整方法的训练或评估入口。后续方法放在 `methods/<方法名>/`，详见[项目目录说明](docs/PROJECT_STRUCTURE.md)。
+当前已实现环境仿真、Master/Member 观测、Random 基线评估、诊断脚本和测试。`env/step/reward.py` 仍为空，奖励计算及返回接口尚未接入；当前没有学习方法的训练入口。方法位于 `methods/<方法名>/`，详见[项目目录说明](docs/PROJECT_STRUCTURE.md)。
 
 ## 目录
 
 ```text
 env/                  区域、用户、UAV、通信、DAG、事件运行时与结算
-config/*.toml         公共环境与工作负载参数
-methods/              后续各方法的独立目录，当前仅保留说明
+config/               公共环境、工作负载及方法运行参数
+methods/              Random 基线、ERS 排序和在线调度辅助循环
 scripts/              环境检查、诊断可视化及少量辅助实现
-tests/                环境与诊断脚本测试
+tests/                环境、方法与诊断脚本测试
 specs/                系统、场景参数和 DAG 模型定义
-docs/                 项目说明与文献调研
+docs/                 项目结构与实现约定
 ```
+
+## Random 基线评估
+
+在项目根目录运行：
+
+```powershell
+uv run python methods/random/run.py
+uv run python methods/random/run.py --episodes 1 --seed 42
+```
+
+运行参数默认读取 `config/methods/random.toml`，每回合步数读取 `config/env.toml` 的 `steps_per_epoch`（默认 500）。结果写入 `results/random/seed_<seed>/` 下的独立运行目录，包含配置、运行元数据、逐步/逐 DAG 指标及汇总。时延不含飞行阶段；失败 DAG 在截断平均时延中按调度窗口长度计入。
 
 ## 环境检查与可视化
 
@@ -27,7 +38,7 @@ uv run python scripts/visualize_dag.py
 uv run python scripts/visualize_scheduling.py
 ```
 
-诊断与测试使用 `scripts/randomness.py`，默认 seed 为 42。`scripts/ers.py` 保留调度回放和环境测试所需的 ERS 排序实现，无需旧实验配置。详见[调度回放说明](scripts/scheduling_replay.md)。
+`MRDTSEnv` 按 `config/env.toml` 的 `env_seed` 生成固定场景，并按 epoch 派生 DAG 随机流；部分独立诊断和测试使用 `scripts/randomness.py`，默认 seed 为 42。ERS 实现在 `methods/random/ers.py`，`scripts/ers.py` 仅保留重导出入口。详见[调度回放说明](scripts/scheduling_replay.md)。
 
 ## 验证与模型资料
 
@@ -41,4 +52,4 @@ uv run python scripts/visualize_scheduling.py
 uv run python -B -m unittest discover -s tests
 ```
 
-建模资料：[系统模型](specs/01_system_model.md)、[场景参数](specs/02_scenario_parameters.md)、[DAG 模型](specs/03_task_dag_model.md)。研究资料：[文献调研](docs/research/2026-09-04-rl-literature-and-framework.md)。
+建模资料：[系统模型](specs/01_system_model.md)、[场景参数](specs/02_scenario_parameters.md)、[DAG 模型](specs/03_task_dag_model.md)。研究问题：[分布式 DAG 调度分析](specs/04_distribute_scenario_DAG_Task_scheduling.md)。
