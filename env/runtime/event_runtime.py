@@ -143,14 +143,33 @@ class SchedulingRuntime:
                     key=key, cpu_cycles=float(features[1]), input_bits=float(features[0]) * 1000.,
                     predecessors=predecessors[key],
                 )
+            keys.extend(node_keys)
+            if request.owner_member is None:
+                self._enqueue_local_tasks(request, self.dag_runtimes[request.key].ready_node_ids)
+                continue
             member_id = request.owner_member.index
             self._managed_dags[member_id] += 1
             self._unfinished_dags[member_id] += 1
             self._remaining_tasks[member_id] += len(node_keys)
             if node_keys and member_id not in self.active_tasks:
                 self._ready_members.add(member_id)
-            keys.extend(node_keys)
+        self._dispatch(self.now)
+        self._process_events_until(self.now)
         return tuple(keys)
+
+    def _enqueue_local_tasks(self, request: DAGRequest, node_ids: Iterable[int]) -> None:
+        """无关联 Member 的就绪节点直接在用户单核 FIFO 上执行，不产生智能体动作。"""
+        dag = self.dag_runtimes[request.key]
+        for node_id in sorted(node_ids):
+            key = TaskKey(*request.key, node_id)
+            task = self.tasks[key]
+            if node_id not in dag.ready_node_ids or task.status is not TaskStatus.UNSCHEDULED:
+                continue
+            task.execution_node = request.ground_device
+            task.input_record = self._submit_data(task, (), task.input_bits, is_input=True)
+            for parent_key in sorted(task.predecessors):
+                task.predecessor_records[parent_key] = self._submit_data(
+                    task, (), 0., predecessor=parent_key)
 
     def submit_placements(self, placements: Mapping[TaskKey, PlacementDecision]) -> None:
         """提交当前决策批次，每个可决策 Member 至多一个任务。
@@ -408,6 +427,10 @@ class SchedulingRuntime:
         dag_key = (task.key.owner_member_id, task.key.user_id, task.key.dag_id)
         dag = self.dag_runtimes[dag_key]
         dag.mark_finished(task.key.node_id, at)
+        request = self._requests[dag_key]
+        if request.owner_member is None:
+            self._enqueue_local_tasks(request, dag.successors[task.key.node_id])
+            return
         member_id = task.key.owner_member_id
         if dag.is_finished:
             self._unfinished_dags[member_id] -= 1

@@ -60,7 +60,8 @@ def run_slot(environment, streams):
     runtime = environment._runtime
     plan = ERS(runtime).plan(begin.requests)
     candidates = {request.key: runtime.candidate_execution_nodes(
-        request.owner_member, request.ground_device) for request in begin.requests}
+        request.owner_member, request.ground_device) for request in begin.requests
+        if request.owner_member is not None}
     orders = {member.index: iter(order) for member, order in plan.member_orders.items()}
     ready = begin.ready_member_ids
     while ready:

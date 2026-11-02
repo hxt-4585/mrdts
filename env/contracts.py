@@ -23,12 +23,13 @@ class DAGRequest:
 
     dag_id: int
     dag: DAG
-    owner_member: EntityRef
+    owner_member: EntityRef | None  # None 表示无关联 Member，由用户自动本地执行。
     ground_device: EntityRef
 
     @property
     def key(self) -> tuple[int, int, int]:
-        return self.owner_member.index, self.ground_device.index, self.dag_id
+        owner_id = -1 if self.owner_member is None else self.owner_member.index
+        return owner_id, self.ground_device.index, self.dag_id
 
     @property
     def task_keys(self) -> tuple[TaskKey, ...]:

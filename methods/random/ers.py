@@ -90,6 +90,8 @@ class ERS:
         locations: dict[tuple[EntityRef, EntityRef], _LocationCosts] = {}
         hop_seconds: dict[DirectedChannelKey, float] = {}
         for request in sorted(requests, key=lambda item: item.key):
+            if request.owner_member is None:
+                continue  # 无关联 Member 的 DAG 已由环境自动本地执行。
             context = request.owner_member, request.ground_device
             if context not in locations:
                 locations[context] = self._location_costs(request, hop_seconds)

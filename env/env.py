@@ -107,8 +107,8 @@ class MRDTSEnv:
     def begin_step(self, flight_actions: np.ndarray) -> BeginStepResult:
         """应用 (M, 2) 飞行动作，准备本窗口首次 Member 决策。
 
-        调用方先 reset，后续窗口须先结算上一窗口，并保证飞行后有用户的
-        区域仍有 Member。每个用户生成一个 DAG；任务排序与卸载由 method 决定。
+        调用方先 reset，后续窗口须先结算上一窗口。每个用户生成一个 DAG；
+        无 Member 区域的 DAG 自动本地执行，其余任务排序与卸载由 method 决定。
         飞行结束即记入推进能耗和能量虚拟队列；不推进调度时钟或 step_index。
         """
         previous_positions = self.members.positions[:self.members.member_uav_count, :2].astype(float)
@@ -189,7 +189,7 @@ class MRDTSEnv:
         self.members.energy_virtual_queue_j += energy_j
 
     def _refresh_topology(self):
-        """刷新成员区域；固定用户关联到同区域内水平距离最近的 Member。"""
+        """用户关联本区域最近的 Member；无 Member 时记为 -1，自动本地执行。"""
         member_count = self.members.member_uav_count
         member_regions = self.members.region_ids[:member_count]
         for member_id, position in enumerate(self.members.positions[:member_count]):
@@ -202,9 +202,11 @@ class MRDTSEnv:
             np.flatnonzero(member_regions == region_id)
             for region_id in range(1, self.region.config.region_count + 1)
         )
-        self.user_member_ids = np.empty(self.users.num_users, dtype=np.int32)
+        self.user_member_ids = np.full(self.users.num_users, -1, dtype=np.int32)
         for user_id, (position, region_id) in enumerate(zip(self.users.positions, self.users.region_ids)):
             candidates = region_members[region_id - 1]
+            if not candidates.size:
+                continue
             displacement = self.members.positions[candidates, :2] - position[:2]
             squared_distances = np.sum(displacement * displacement, axis=1)
             self.user_member_ids[user_id] = candidates[np.argmin(squared_distances)]
@@ -235,7 +237,9 @@ class MRDTSEnv:
             positions[ground] = position
             powers[ground] = self.users.config.transmit_power
             servers[ground] = ServerSpec((self.users.config.core_frequency,), 0.0)
-            ground_owner_members[ground] = member_nodes[self.user_member_ids[user_id]]
+            member_id = self.user_member_ids[user_id]
+            if member_id != -1:
+                ground_owner_members[ground] = member_nodes[member_id]
 
         self._runtime = SchedulingRuntime(
             self._channel_model, positions, servers, powers,
@@ -258,7 +262,7 @@ class MRDTSEnv:
             DAGRequest(
                 first_dag_id + user_id,
                 self.dag_generator.generate_single_dag(),
-                member_nodes[member_id],
+                member_nodes[member_id] if member_id != -1 else None,
                 EntityRef(EntityKind.GROUND_DEVICE, user_id),
             )
             for user_id, member_id in enumerate(self.user_member_ids)

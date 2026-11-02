@@ -33,7 +33,7 @@ class DirectedChannelKey:
 
 @dataclass(frozen=True, order=True)
 class TaskKey:
-    owner_member_id: int
+    owner_member_id: int  # -1 为自动本地执行任务，不对应任何 Member。
     user_id: int
     dag_id: int
     node_id: int
