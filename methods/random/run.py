@@ -9,6 +9,7 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+from time import perf_counter
 import tomllib
 import uuid
 
@@ -25,7 +26,7 @@ from methods.random.ers import ERS
 
 
 class RandomStreams:
-    """方法侧仅管理飞行与调度随机流；场景和 DAG 由环境按相同种子派生。"""
+    """方法种子派生独立的飞行与调度随机流，不参与环境随机流的初始化。"""
 
     def __init__(self, seed=42, episode=0):
         self.seed = seed
@@ -45,11 +46,11 @@ def resolved_settings(users=None, dag_nodes=None):
     return settings
 
 
-def build_scene(settings, streams):
-    settings = {**settings, 'env': replace(settings['env'], env_seed=streams.seed)}
+def build_scene(settings, *, episode):
+    """场景和本 episode 的任务均由环境配置中的 env_seed 控制。"""
     environment = MRDTSEnv(settings)
     environment.generate_scene()
-    environment.reset(epoch_index=streams.episode)
+    environment.reset(epoch_index=episode)
     return environment
 
 
@@ -76,16 +77,21 @@ def run_slot(environment, streams):
 
 def slot_metrics(result, episode, slot, flight_violations):
     count = len(result.dags)
-    failed = sum(dag.failed for dag in result.dags)
-    delays = [dag.completion_time - result.slot_start for dag in result.dags if not dag.failed]
-    delay_sum = sum(delays)
-    truncated_sum = delay_sum + failed * (result.slot_end - result.slot_start)
+    failed = 0
+    delay_sum = successful_delay_sum = 0.
+    for dag in result.dags:
+        delay = dag.completion_time - result.slot_start
+        delay_sum += delay
+        failed += dag.failed
+        if not dag.failed:
+            successful_delay_sum += delay
+    finished = count - failed
     return dict(episode=episode, slot=slot, dag_count=count, failed_dags=failed,
                 failure_rate=failed / count if count else 0.,
-                successful_delay_sum_s=delay_sum,
-                successful_mean_delay_s=delay_sum / len(delays) if delays else None,
-                truncated_delay_sum_s=truncated_sum,
-                truncated_mean_delay_s=truncated_sum / count if count else None,
+                successful_delay_sum_s=successful_delay_sum,
+                successful_mean_delay_s=successful_delay_sum / finished if finished else None,
+                delay_sum_s=delay_sum,
+                mean_delay_s=delay_sum / count if count else None,
                 flight_violations=flight_violations)
 
 
@@ -97,8 +103,7 @@ def summarize(rows):
                 failure_rate=failed / count if count else 0.,
                 successful_mean_delay_s=(sum(row['successful_delay_sum_s'] for row in rows) / finished
                                          if finished else None),
-                truncated_mean_delay_s=(sum(row['truncated_delay_sum_s'] for row in rows) / count
-                                        if count else None),
+                mean_delay_s=(sum(row['delay_sum_s'] for row in rows) / count if count else None),
                 flight_violations=sum(row['flight_violations'] for row in rows))
 
 
@@ -115,8 +120,9 @@ def git_output(*args):
 
 
 def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='results'):
+    """seed 仅控制方法；环境种子来自 config/env.toml。"""
+    started = perf_counter()
     settings = resolved_settings(users, dag_nodes)
-    settings['env'] = replace(settings['env'], env_seed=seed)
     steps_per_epoch = settings['env'].steps_per_epoch
     output_root = Path(output_root)
     if not output_root.is_absolute():
@@ -124,13 +130,18 @@ def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='re
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ') + '_' + uuid.uuid4().hex[:8]
     output = output_root / 'random' / f'seed_{seed}' / stamp
     output.mkdir(parents=True, exist_ok=False)
+    print(f'结果目录：{output}', flush=True)
+    print(f'Random | 环境种子 {settings["env"].env_seed} | 方法种子 {seed} | '
+          f'{episodes} episodes | {steps_per_epoch} slots/episode', flush=True)
     write_json(output / 'config.json', dict(
-        method='random', ordering='ers', seed=seed, episodes=episodes,
+        method='random', ordering='ers', method_seed=seed, episodes=episodes,
         environment={name: asdict(value) for name, value in settings.items()},
         delay_definition='completion_time - slot_start; execution continues beyond nominal scheduling duration',
+        failure_definition='delay_s > scheduling_duration_s; actual delays include failed DAGs',
     ))
     metadata = dict(status='running', started_at=datetime.now(timezone.utc).isoformat(),
-                    method='random', seed=seed, branch=git_output('branch', '--show-current'),
+                    method='random', method_seed=seed, env_seed=settings['env'].env_seed,
+                    branch=git_output('branch', '--show-current'),
                     commit=git_output('rev-parse', 'HEAD'), working_tree_status=git_output('status', '--short'),
                     python=platform.python_version(), numpy=np.__version__)
     write_json(output / 'metadata.json', metadata)
@@ -141,14 +152,16 @@ def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='re
             metrics_writer = None
             dag_writer = csv.DictWriter(dags_file, fieldnames=[
                 'episode', 'slot', 'owner_member_id', 'user_id', 'dag_id',
-                'failed', 'completion_time_s', 'delay_s', 'truncated_delay_s',
+                'failed', 'completion_time_s', 'delay_s',
             ])
             dag_writer.writeheader()
             for episode in range(episodes):
                 streams = RandomStreams(seed, episode)
                 # 同一空间随机流重建场景：区域、用户固定，UAV 回到初始位置。
-                scene = build_scene(settings, streams)
+                print(f'Episode {episode + 1}/{episodes} | 初始化场景', flush=True)
+                scene = build_scene(settings, episode=episode)
                 for slot in range(steps_per_epoch):
+                    slot_started = perf_counter()
                     result, violations = run_slot(scene, streams)
                     row = slot_metrics(result, episode, slot, violations)
                     rows.append(row)
@@ -157,15 +170,18 @@ def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='re
                         metrics_writer.writeheader()
                     metrics_writer.writerow(row)
                     for dag in result.dags:
-                        delay = None if dag.failed else dag.completion_time - result.slot_start
+                        delay = dag.completion_time - result.slot_start
                         dag_writer.writerow(dict(
                             episode=episode, slot=slot, owner_member_id=dag.key[0], user_id=dag.key[1],
                             dag_id=dag.key[2], failed=dag.failed, completion_time_s=dag.completion_time,
-                            delay_s=delay, truncated_delay_s=(result.slot_end - result.slot_start
-                                                             if dag.failed else delay),
+                            delay_s=delay,
                         ))
                     metrics_file.flush()
                     dags_file.flush()
+                    now = perf_counter()
+                    print(f'Episode {episode + 1}/{episodes} | Slot {slot + 1}/{steps_per_epoch} | '
+                          f'平均时延 {row["mean_delay_s"]:.3f}s | 失败率 {row["failure_rate"]:.1%} | '
+                          f'本步耗时 {now - slot_started:.2f}s | 累计 {now - started:.1f}s', flush=True)
         write_json(output / 'summary.json', summarize(rows))
         metadata['status'] = 'completed'
     except BaseException as error:
@@ -182,7 +198,8 @@ def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='re
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=PROJECT_ROOT / 'config' / 'methods' / 'random.toml')
-    for name in ('seed', 'episodes', 'users', 'dag-nodes'):
+    parser.add_argument('--seed', type=int, help='方法随机种子；环境种子读取 config/env.toml 的 env_seed')
+    for name in ('episodes', 'users', 'dag-nodes'):
         parser.add_argument(f'--{name}', type=int)
     parser.add_argument('--output-root', type=Path)
     args = parser.parse_args()

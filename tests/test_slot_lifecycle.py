@@ -128,8 +128,8 @@ class TestSlotLifecycle(unittest.TestCase):
         result = self.environment.end_step().slot_result
         self.assertIsNone(self.environment._runtime)
         self.assertTrue(runtime.closed)
-        self.assertFalse(result.failed_dags)
-        self.assertEqual(result.finished_dags, (request.key,))
+        self.assertEqual(result.failed_dags, (request.key,))
+        self.assertFalse(result.finished_dags)
         self.assertAlmostEqual(result.dags[0].completion_time, 2.02)
         self.assertAlmostEqual(result.slot_end, 2.02)
         self.assertTrue(all(runtime.trace(key).status.value == "finished" for key in keys))
@@ -158,8 +158,8 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertEqual(runtime.trace(finished).compute_finish_at, 1.0)
         self.assertEqual(runtime.trace(waiting).compute_start_at, 1.)
         self.assertAlmostEqual(runtime.trace(waiting).compute_finish_at, 1.01)
-        self.assertEqual(len(result.finished_dags), 2)
-        self.assertFalse(result.failed_dags)
+        self.assertEqual(result.finished_dags, ((finished.owner_member_id, finished.user_id, finished.dag_id),))
+        self.assertEqual(result.failed_dags, ((waiting.owner_member_id, waiting.user_id, waiting.dag_id),))
 
     def test_advancing_to_nominal_boundary_does_not_close_runtime(self):
         runtime = self._begin()
@@ -185,7 +185,8 @@ class TestSlotLifecycle(unittest.TestCase):
         self.assertAlmostEqual(task.compute_energy_j, expected)
         self.assertAlmostEqual(result.compute_energy_j, expected)
         self.assertGreater(task.compute_finish_at, runtime.deadline)
-        self.assertFalse(result.failed_dags)
+        self.assertEqual(len(result.failed_dags), 1)
+        self.assertFalse(result.finished_dags)
 
     def test_position_snapshot_is_independent_of_input_array(self):
         runtime = self._begin()

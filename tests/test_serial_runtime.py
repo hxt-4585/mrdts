@@ -175,8 +175,8 @@ class TestSerialRuntime(unittest.TestCase):
         self.runtime.submit_placements({d.task_keys[0]: PlacementDecision(
             self.members[3] if i == 3 else self.bs) for i, d in enumerate(dags)})
         result = self.runtime.finish_slot()
-        self.assertEqual(len(result.finished_dags), 3)
-        self.assertEqual(len(result.failed_dags), 0)
+        self.assertEqual(result.finished_dags, (dags[3].key,))
+        self.assertEqual(result.failed_dags, (dags[1].key, dags[2].key))
         self.assertIsNone(result.dags[0].completion_time)
         self.assertIs(self.runtime.trace(dags[0].task_keys[1]).status, TaskStatus.UNSCHEDULED)
         self.assertEqual(self.runtime.trace(dags[3].task_keys[0]).compute_finish_at, 1.)
@@ -200,13 +200,29 @@ class TestSerialRuntime(unittest.TestCase):
         self.assertEqual(runtime.trace(parent).compute_finish_at, 2.)
         self.assertEqual(runtime.trace(child).decision_at, 2.)
         self.assertAlmostEqual(runtime.trace(child).compute_finish_at, 5.)
-        self.assertEqual(result.finished_dags, (dag.key,))
-        self.assertFalse(result.failed_dags)
+        self.assertFalse(result.finished_dags)
+        self.assertEqual(result.failed_dags, (dag.key,))
         self.assertAlmostEqual(result.dags[0].completion_time, 5.)
         self.assertAlmostEqual(result.slot_end, 5.)
         self.assertAlmostEqual(result.compute_energy_j, 20.)
         self.assertAlmostEqual(result.tx_energy_j, 2.)
         self.assertTrue(all(runtime.trace(key).failed_at is None for key in (parent, child)))
+
+    def test_completion_deadline_is_checked_per_dag_from_nonzero_slot_start(self):
+        runtime, members, grounds, bs = make_runtime(duration=1., slot_start=10.)
+        dags = [request(members[i], grounds[i], cycles=(cycles,))
+                for i, cycles in enumerate((5., 10., 20.))]
+        runtime.register_dags(dags)
+        runtime.submit_placements({dag.task_keys[0]: PlacementDecision(grounds[i])
+                                   for i, dag in enumerate(dags)})
+        result = runtime.finish_slot()
+
+        self.assertEqual([dag.completion_time for dag in result.dags], [10.5, 11., 12.])
+        self.assertEqual(result.finished_dags, (dags[0].key, dags[1].key))
+        self.assertEqual(result.failed_dags, (dags[2].key,))
+        self.assertEqual(result.slot_end, 12.)
+        self.assertTrue(all(runtime.trace(dag.task_keys[0]).status is TaskStatus.FINISHED
+                            for dag in dags))
 
     def test_simultaneous_completions_and_zero_duration_settle_before_observation(self):
         self.runtime, self.members, self.grounds, self.bs = make_runtime(cores=2)

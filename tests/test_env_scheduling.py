@@ -78,8 +78,8 @@ class TestEnvScheduling(unittest.TestCase):
                 self.assertEqual(environment.submit_schedule(
                     {dag.task_keys[1]: PlacementDecision(bs)}), ())
                 result = runtime.finish_slot()
-                self.assertEqual(result.finished_dags, (dag.key,))
-                self.assertFalse(result.failed_dags)
+                self.assertFalse(result.finished_dags)
+                self.assertEqual(result.failed_dags, (dag.key,))
                 self.assertEqual(result.slot_end, cycles / 10. + 1.)
                 self.assertEqual(result.compute_energy_j, 0.)
                 self.assertIs(result, runtime.finish_slot())

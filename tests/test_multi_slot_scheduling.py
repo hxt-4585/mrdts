@@ -101,8 +101,8 @@ class TestMultiSlotScheduling(unittest.TestCase):
         self.assertEqual(self.runtime.advance_to_decision(), (owner.index,))
         run_online_schedule(self.runtime, {owner: keys[1:]}, lambda key: PlacementDecision(ground))
         result = self.environment.end_step().slot_result
-        self.assertFalse(result.failed_dags)
-        self.assertEqual(result.finished_dags, (request.key,))
+        self.assertEqual(result.failed_dags, (request.key,))
+        self.assertFalse(result.finished_dags)
         self.assertTrue(previous_runtime.closed)
         self.assertTrue(all(task.status is TaskStatus.FINISHED for task in previous_runtime.tasks.values()))
 

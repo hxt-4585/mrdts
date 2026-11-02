@@ -56,7 +56,9 @@ class TestSettings(unittest.TestCase):
         """通信模型配置包含全网带宽、噪声谱密度和 LoS/NLoS 参数。"""
         config = ChannelConfig.from_toml(PROJECT_ROOT / "config" / "channel.toml")
 
-        self.assertEqual(config.total_bandwidth_mhz, 12.0)
+        with (PROJECT_ROOT / "config" / "channel.toml").open("rb") as file:
+            expected = tomllib.load(file)
+        self.assertEqual(config.total_bandwidth_mhz, expected["bandwidth"]["total_mhz"])
         self.assertEqual(config.reference_channel_gain, 1e-6)
         self.assertEqual(config.nlos_attenuation_factor, 0.2)
         self.assertEqual(config.noise_density_w_per_hz, 2.5e-20)

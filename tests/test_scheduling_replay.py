@@ -74,8 +74,8 @@ class TestSchedulingReplay(unittest.TestCase):
 
     def test_overload_replay_includes_full_execution_beyond_nominal_boundary(self):
         data = self.build(load_scale=10000.0)
-        self.assertEqual(data["summary"]["failed_dags"], 0)
-        self.assertEqual(data["summary"]["finished_dags"], len(data["dags"]))
+        self.assertEqual(data["summary"]["failed_dags"], len(data["dags"]))
+        self.assertEqual(data["summary"]["finished_dags"], 0)
         self.assertGreater(data["meta"]["slot_end"], data["meta"]["deadline"])
         self.assertTrue(all(x["completed"] for x in data["transfers"]))
         self.assertTrue(all(t["finish"] is not None and t["failed_at"] is None

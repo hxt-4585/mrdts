@@ -54,9 +54,10 @@ class TestChannelModel(unittest.TestCase):
             receiver, transmitter, 1.0, LinkType.AIR_TO_GROUND
         )
 
-        self.assertEqual(ground_to_air.bandwidth_hz, 12e6)
-        self.assertEqual(air_to_air.bandwidth_hz, 12e6)
-        self.assertEqual(air_to_ground.bandwidth_hz, 12e6)
+        expected_bandwidth_hz = self.config.total_bandwidth_mhz * 1e6
+        self.assertEqual(ground_to_air.bandwidth_hz, expected_bandwidth_hz)
+        self.assertEqual(air_to_air.bandwidth_hz, expected_bandwidth_hz)
+        self.assertEqual(air_to_ground.bandwidth_hz, expected_bandwidth_hz)
         self.assertGreater(air_to_air.rate_bps, ground_to_air.rate_bps)
         self.assertAlmostEqual(air_to_ground.rate_bps, ground_to_air.rate_bps)
 

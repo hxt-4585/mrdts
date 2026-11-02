@@ -66,7 +66,9 @@ class TestSchedulingRuntime(unittest.TestCase):
         edge_hop = DirectedChannelKey(self.member, self.bs)
         transfer_id = self.runtime.trace(child).predecessor_records[parent].transfer_ids[0]
         self.assertEqual(self.runtime.transfer_jobs[transfer_id].payload_bits, 1000.)
-        self.assertEqual(self.runtime.transfer_jobs[transfer_id].bandwidth_hz, 6e6)
+        # 两条活动信道均分配置中的全网总带宽。
+        expected_bandwidth_hz = self.runtime.channel_model.config.total_bandwidth_mhz * 1e6 / 2
+        self.assertEqual(self.runtime.transfer_jobs[transfer_id].bandwidth_hz, expected_bandwidth_hz)
 
     def test_relayed_inputs_and_local_predecessor_enable_computation(self):
         keys = self.register()

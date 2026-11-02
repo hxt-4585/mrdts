@@ -293,11 +293,18 @@ class SchedulingRuntime:
         return self._result
 
     def _close_slot(self) -> None:
+        dags = []
+        for key, dag in sorted(self.dag_runtimes.items()):
+            completion_time = dag.completion_time
+            # 超时只影响结算结果，不中断执行；恰好到达边界仍算成功。
+            failed = dag.failed_at is not None or (
+                completion_time is not None and bool(completion_time > self.deadline)
+            )
+            dags.append(DAGResult(key, completion_time, failed))
         self._result = SlotResult(
             slot_start=self.slot_start,
             slot_end=self.now,
-            dags=tuple(DAGResult(key, dag.completion_time, dag.failed_at is not None)
-                       for key, dag in sorted(self.dag_runtimes.items())),
+            dags=tuple(dags),
             compute_energy_j=sum(energy[0] for energy in self._member_energy.values()),
             tx_energy_j=sum(energy[1] for energy in self._member_energy.values()),
             member_energy=tuple(MemberEnergyResult(node.index, *energy)

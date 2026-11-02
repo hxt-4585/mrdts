@@ -22,6 +22,7 @@ class TestLocalFallback(unittest.TestCase):
         traces = [runtime.trace(key) for key in local.task_keys]
         self.assertEqual([t.compute_start_at for t in traces], [0., 1., 3., 6.])
         self.assertEqual(result.dags[0].completion_time, 10.)
+        self.assertEqual(result.failed_dags, (local.key,))
         self.assertEqual(result.slot_end, 10.)
         self.assertTrue(all(t.execution_node == grounds[0] for t in traces))
         self.assertFalse(runtime.transfer_jobs)
@@ -41,7 +42,8 @@ class TestLocalFallback(unittest.TestCase):
         runtime.submit_placements({managed.task_keys[1]: PlacementDecision(bs)})
         self.assertEqual(runtime.advance_to_decision(), ())
         result = runtime.finish_slot()
-        self.assertEqual(len(result.finished_dags), 2)
+        self.assertFalse(result.finished_dags)
+        self.assertEqual(result.failed_dags, (local.key, managed.key))
         self.assertEqual(result.slot_end, 10.)
         self.assertEqual(set(runtime.pop_member_rewards()), set(managed.task_keys))
 
