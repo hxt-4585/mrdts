@@ -107,6 +107,7 @@ class MRDTSEnv:
     def begin_step(self, flight_actions: np.ndarray) -> BeginStepResult:
         """应用 (M, 2) 飞行动作，准备本窗口首次 Member 决策。
 
+        每行动作为 [a_x, a_y]，两个分量各自位于 [-1, 1]。
         调用方先 reset，后续窗口须先结算上一窗口。每个用户生成一个 DAG；
         无 Member 区域的 DAG 自动本地执行，其余任务排序与卸载由 method 决定。
         飞行结束即记入推进能耗和能量虚拟队列；不推进调度时钟或 step_index。
@@ -232,11 +233,12 @@ class MRDTSEnv:
             )
 
         ground_owner_members = {}
+        ground_server = ServerSpec((self.users.config.core_frequency,) * self.users.config.core_count, 0.0)
         for user_id, position in enumerate(self.users.positions):
             ground = EntityRef(EntityKind.GROUND_DEVICE, user_id)
             positions[ground] = position
             powers[ground] = self.users.config.transmit_power
-            servers[ground] = ServerSpec((self.users.config.core_frequency,), 0.0)
+            servers[ground] = ground_server
             member_id = self.user_member_ids[user_id]
             if member_id != -1:
                 ground_owner_members[ground] = member_nodes[member_id]

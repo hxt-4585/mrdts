@@ -1,0 +1,27 @@
+# python -m methods.local_surrogate.run
+# python -m methods.local_surrogate.evaluate --checkpoint RUN/checkpoint.pt
+# 独立基线：低层第 371 轮，冻结、argmax、ERS；不修改环境及已有方法。
+# 环境由低层检查点恢复；--slots 仅用于短程测试。
+# 高层扩展信息：一跳 GD 静态位置/数量、上时隙区域时延、可见 Member 位置和 Q。
+# 每个区域独立回归 D_region/H 和飞行前归属 UAV 的 (悬停+计算+传输)/E_budget。
+# 飞行能耗直接计算；冻结低层仍按原时延策略运行，整个方法只是 P2 的局部近似。
+# 正式训练以 0..episodes-1 的 DAG 流采样，评估默认从 1000000 开始且不更新模型。
+[train]
+member_checkpoint = "results/random_uav_ppo/seed_45/train_20261103T162321_743467Z_84a29361/checkpoint.pt"
+episodes = 30
+seed = 45
+device = "cpu"
+torch_threads = 1
+warmup_slots = 128
+exploration = 0.15
+candidates = 32
+rounds = 2
+features = 32
+ridge = 1.0
+# 归一化目标 sum[(Q/E_budget)*(E/E_budget)] + delay_weight * sum(D/H)。
+# E_budget、H 为常数，与稿件目标仅相差整体尺度和 V 的换算。
+delay_weight = 1.0
+# 回归杠杆值和历史残差产生启发式不确定性惩罚，没有概率安全保证。
+uncertainty_penalty = 0.05
+log_interval = 50
+output_root = "results"

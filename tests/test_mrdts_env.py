@@ -404,7 +404,8 @@ class TestMRDTSEnv(unittest.TestCase):
 
     def test_begin_step_uses_configured_resources_and_current_window_without_advancing_step(self):
         settings = self.settings()
-        settings["user"] = replace(settings["user"], total_users=8, transmit_power=.3, core_frequency=1.7e9)
+        settings["user"] = replace(settings["user"], total_users=8, transmit_power=.3,
+                                   core_count=3, core_frequency=1.7e9)
         settings["env"] = replace(settings["env"], scheduling_duration_s=2.5)
         settings["channel"] = replace(settings["channel"], total_bandwidth_mhz=17.)
         settings["uav"] = replace(settings["uav"], bs_transmit_power=2.5)
@@ -428,7 +429,7 @@ class TestMRDTSEnv(unittest.TestCase):
         ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
         self.assertEqual(runtime.transmit_powers[ground], .3)
         self.assertEqual(runtime.transmit_powers[runtime.global_bs], 2.5)
-        self.assertEqual(runtime.servers[ground].core_frequencies, (1.7e9,))
+        self.assertEqual(runtime.servers[ground].core_frequencies, (1.7e9,) * 3)
         for member_id in range(environment.members.member_uav_count):
             server = runtime.servers[EntityRef(EntityKind.MEMBER_UAV, member_id)]
             self.assertEqual(server.core_frequencies, (settings["uav"].member_core_frequency,) * settings["uav"].member_core_count)

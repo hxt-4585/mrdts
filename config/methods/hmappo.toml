@@ -3,7 +3,7 @@
 # 保留 ERS 子任务顺序。Master 学习飞行，Member 学习执行位置。
 [train]
 episodes = 500
-seed = 42
+seed = 45
 device = "cpu"
 torch_threads = 1
 hidden = 128

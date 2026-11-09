@@ -1,0 +1,31 @@
+# Independent ACAC adaptation; Member rewards, shared environment and random flight
+# match random_uav_ppo. Uses per-Member value outputs instead of a team reward.
+# python methods/random_uav_acac/run.py --config config/methods/random_uav_acac.toml
+# python methods/random_uav_acac/evaluate.py --checkpoints RUN/checkpoint.pt --ppo-checkpoints PPO_RUN/checkpoint.pt
+[train]
+episodes = 500
+seed = 45
+device = "cpu"
+torch_threads = 1
+hidden = 128
+rollout_slots = 8
+ppo_epochs = 4
+minibatch_size = 256
+learning_rate = 0.0003
+member_gamma = 1.0
+gae_lambda = 0.95
+clip_ratio = 0.2
+entropy_coef = 0.01
+value_coef = 0.5
+max_grad_norm = 0.5
+output_root = "results"
+diagnostics_interval = 5
+log_interval = 5
+metrics_interval = 10
+snapshot_interval = 10
+resample_slots = 10
+
+# ACAC-specific architecture. Minibatches retain entire slot sequences;
+# minibatch_size is a soft cap on the number of Member decisions.
+time_dim = 16
+attention_heads = 4

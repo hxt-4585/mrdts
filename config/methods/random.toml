@@ -1,7 +1,7 @@
 # Random 方法的运行参数。
 [run]
 # 仅控制方法侧飞行与调度；环境随机性由 config/env.toml 的 env_seed 控制。
-seed = 42
+seed = 45
 episodes = 2
 output_root = "results"
 # 用户数和每个 DAG 的节点数默认读取 config/user.toml、config/dag.toml。

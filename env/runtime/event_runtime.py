@@ -158,7 +158,7 @@ class SchedulingRuntime:
         return tuple(keys)
 
     def _enqueue_local_tasks(self, request: DAGRequest, node_ids: Iterable[int]) -> None:
-        """无关联 Member 的就绪节点直接在用户单核 FIFO 上执行，不产生智能体动作。"""
+        """无关联 Member 的就绪节点进入用户本地 FIFO 队列，由空闲核心执行。"""
         dag = self.dag_runtimes[request.key]
         for node_id in sorted(node_ids):
             key = TaskKey(*request.key, node_id)

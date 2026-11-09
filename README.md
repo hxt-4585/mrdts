@@ -1,5 +1,7 @@
 # MRDTS
 
+基线的设计、实现及历史实验效果见[基线方法说明](docs/BASELINES.md)（2026-11-06）；下文关于学习方法和奖励尚未实现的状态描述已过时。
+
 多区域 UAV 的 DAG 子任务调度科研仿真项目。优先保证算法流程直观、便于阅读和修改；每种方法在一个目录内独立实现，允许不同方法之间重复代码。
 
 当前已实现环境仿真、Master/Member 观测、Random 基线评估、诊断脚本和测试。`env/step/reward.py` 已预留 `MasterReward`（系统级时隙奖励，所有 Master 共享）和 `MemberReward`（子任务级）计算接口，公式尚未实现，奖励计算及返回接口尚未接入；当前没有学习方法的训练入口。方法位于 `methods/<方法名>/`，详见[项目目录说明](docs/PROJECT_STRUCTURE.md)。

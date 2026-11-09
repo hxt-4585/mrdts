@@ -1,5 +1,6 @@
 """无 Member 区域的自动本地执行与正常卸载共用同一时钟。"""
 
+from dataclasses import replace
 import unittest
 import numpy as np
 
@@ -57,8 +58,10 @@ class TestLocalFallback(unittest.TestCase):
         self.assertTrue(all(d.completion_time == 1. for d in result.dags))
         self.assertTrue(all(t.status is TaskStatus.FINISHED for t in runtime.tasks.values()))
 
-    def make_env(self):
+    def make_env(self, core_count=None):
         settings = resolved_settings(users=8, dag_nodes=4)
+        if core_count is not None:
+            settings["user"] = replace(settings["user"], core_count=core_count)
         environment = MRDTSEnv(settings)
         environment.generate_scene()
         environment.reset(epoch_index=0)
@@ -77,7 +80,7 @@ class TestLocalFallback(unittest.TestCase):
         self.assertTrue(all(d.key[0] == -1 for d in local_results))
 
     def test_all_users_local_settle_reward_hover_and_next_slot_reassociation(self):
-        environment = self.make_env()
+        environment = self.make_env(core_count=1)
         # 本窗口所有用户放在没有 Member 的区域 2。
         environment.users.positions[:, :2] = environment.masters.positions[1, :2]
         environment.users.region_ids[:] = 2

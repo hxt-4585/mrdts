@@ -28,7 +28,7 @@ from methods.random.ers import ERS
 class RandomStreams:
     """方法种子派生独立的飞行与调度随机流，不参与环境随机流的初始化。"""
 
-    def __init__(self, seed=42, episode=0):
+    def __init__(self, seed=45, episode=0):
         self.seed = seed
         self.episode = episode
         self.flight = np.random.default_rng(np.random.SeedSequence([seed, episode, 101]))
@@ -119,7 +119,7 @@ def git_output(*args):
         return None
 
 
-def evaluate(*, seed=42, episodes=2, users=None, dag_nodes=None, output_root='results'):
+def evaluate(*, seed=45, episodes=2, users=None, dag_nodes=None, output_root='results'):
     """seed 仅控制方法；环境种子来自 config/env.toml。"""
     started = perf_counter()
     settings = resolved_settings(users, dag_nodes)

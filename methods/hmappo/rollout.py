@@ -89,10 +89,18 @@ def decide(policy, inputs, deterministic):
 
 
 def collect_slot(adapter, master, members, *, deterministic=False, member_gamma=1., gae_lambda=.95,
-                 boundary_penalty=.1):
+                 boundary_penalty=.1, flight_actions=None, member_deterministic=None):
     env = adapter.env
-    master_samples = decide(master, adapter.master_inputs(), deterministic)
-    actions = np.stack([np.tanh(sample.action) * sample.mask for sample in master_samples]).sum(0)
+    if flight_actions is None:
+        master_samples = decide(master, adapter.master_inputs(), deterministic)
+        actions = np.stack([np.tanh(sample.action) * sample.mask for sample in master_samples]).sum(0)
+        ownership = np.stack([sample.mask[::2] for sample in master_samples])
+    else:
+        master_samples = []
+        actions = flight_actions
+        ownership = env.masters.region_ids[:, None] == env.members.region_ids[None, :adapter.members]
+    if member_deterministic is None:
+        member_deterministic = deterministic
     positions_before = env.members.positions[:adapter.members, :2].copy()
     begin = env.begin_step(actions.reshape(adapter.members, 2))
     displacement = np.linalg.norm(env.members.positions[:adapter.members, :2] - positions_before, axis=1)
@@ -107,7 +115,7 @@ def collect_slot(adapter, master, members, *, deterministic=False, member_gamma=
         placements = {}
         for row, key in enumerate(keys):
             sample = decide(members[key.owner_member_id],
-                            tuple(values[row:row + 1] for values in inputs), deterministic)[0]
+                            tuple(values[row:row + 1] for values in inputs), member_deterministic)[0]
             pending[key] = sample
             trajectories[key.owner_member_id].append(sample)
             placements[key] = PlacementDecision(adapter.execution_node(int(sample.action), key))
@@ -118,31 +126,29 @@ def collect_slot(adapter, master, members, *, deterministic=False, member_gamma=
     for key, reward in result.member_rewards.items():
         pending.pop(key).reward = reward
     delay_reward = result.master_reward
-    penalty_sum = 0.
-    for sample in master_samples:
+    penalties = boundary_penalty * np.count_nonzero(ownership & begin.flight_violations, axis=1)
+    penalty_sum = float(penalties.sum())
+    for sample, penalty in zip(master_samples, penalties):
         # 采样 mask 保存飞行前归属；每个 Member 的 x/y 动作共用一个归属标记。
-        penalty = boundary_penalty * np.count_nonzero(sample.mask[::2] & begin.flight_violations)
         sample.reward = delay_reward - penalty
-        penalty_sum += penalty
     member_samples = {owner: finish_trajectory(trajectory, 0., member_gamma, gae_lambda)
                       for owner, trajectory in trajectories.items()}
     metrics = slot_metrics(result.slot_result, env.epoch_index, env.step_index - 1,
                            int(begin.flight_violations.sum()))
     metrics.update(master_reward=delay_reward,
-                   master_training_reward_mean=delay_reward - penalty_sum / len(master_samples),
+                   master_training_reward_mean=delay_reward - penalty_sum / len(ownership),
                    master_boundary_penalty_sum=penalty_sum,
                    member_reward_sum=sum(s.reward for samples in member_samples.values() for s in samples),
                    member_decisions=sum(map(len, member_samples.values())),
                    total_energy_j=float(result.total_energy_j.sum()),
                    mean_energy_queue_j=float(result.energy_virtual_queue_j.mean()))
     metrics['flight_displacement_mean_m'] = float(displacement.mean())
-    for owner, sample in enumerate(master_samples):
-        owned = sample.mask[::2]
-        metrics.update({f'master_{owner}_reward': sample.reward,
+    for owner, owned in enumerate(ownership):
+        metrics.update({f'master_{owner}_reward': delay_reward - penalties[owner],
                         f'master_{owner}_owned_members': int(owned.sum()),
                         f'master_{owner}_flight_violations': int(np.count_nonzero(owned & begin.flight_violations)),
                         f'master_{owner}_displacement_mean_m': float(displacement[owned].mean()) if owned.any() else None,
-                        f'master_{owner}_boundary_penalty': delay_reward - sample.reward})
+                        f'master_{owner}_boundary_penalty': penalties[owner]})
     return master_samples, member_samples, metrics
 
 

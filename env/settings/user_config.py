@@ -16,6 +16,7 @@ class UserConfig:
     center_spread_ratio: float
     transmit_power: float
     core_frequency: float
+    core_count: int = 1
 
     @classmethod
     def default(cls) -> "UserConfig":
@@ -37,4 +38,5 @@ class UserConfig:
             center_spread_ratio=population["center_spread_ratio"],
             transmit_power=population["transmit_power"],
             core_frequency=computation["core_frequency"],
+            core_count=computation.get("core_count", 1),
         )

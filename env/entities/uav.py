@@ -105,7 +105,9 @@ class MemberUAV(UAV):
         """应用合法的水平飞行动作，并返回每架 Member 的越界标记。
 
         Args:
-            normalized_actions: shape=(M, 2) 的归一化动作矩阵，元素位于 [-1, 1]。
+            normalized_actions: shape=(M, 2) 的二维动作向量矩阵，每行为
+                [a_x, a_y]，两个分量各自位于 [-1, 1]，不限制向量模长为 1。
+                各分量乘以 max_horizontal_speed 得到对应轴的速度分量。
             side_length: 正方形部署区域的边长；合法水平坐标位于闭区间
                 ``[0, side_length]``。
 

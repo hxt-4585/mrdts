@@ -1,0 +1,45 @@
+# Independently implemented joint training; no pretrained policies.
+# Eight TOTAL sampled slots per update, independent of sampler count.
+[train]
+episodes = 125
+slots = 500
+workers = 2
+rollout_slots = 8
+seed = 45
+hidden = 128
+device = "cuda"
+time_dim = 16
+attention_heads = 4
+learning_rate = 0.0003
+ppo_epochs = 4
+minibatch_size = 256
+member_gamma = 1.0
+gae_lambda = 0.95
+clip_ratio = 0.2
+entropy_coef = 0.01
+value_coef = 0.5
+max_grad_norm = 0.5
+train_epoch_start = 400000
+validation_interval = 5
+validation_epochs = [1500000, 1500001, 1500002]
+test_epochs = [2500000, 2500001, 2500002, 2500003, 2500004, 2500005, 2500006, 2500007, 2500008, 2500009]
+evaluation_slots = 500
+checkpoint_interval = 50
+output_root = "results/joint_delay_acac"
+
+# Same algorithm, architecture, initialization and update budget in both groups.
+[high]
+seed = 45
+hidden = 64
+learning_rate = 0.001
+replay_size = 4096
+batch_size = 64
+fit_interval = 4
+fit_steps = 2
+warmup_samples = 128
+rounds = 3
+gradient_rate = 0.02
+exploration_start = 1.0
+exploration_end = 0.15
+exploration_hold = 64
+

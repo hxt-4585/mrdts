@@ -1,0 +1,38 @@
+# UAV 随机向量飞行、固定用户布局，仅训练 Member；训练 DAG 按 episode/slot 变化。
+# 训练：python methods/random_uav_ppo/run.py --config config/methods/random_uav_ppo.toml
+# 配对评估：python methods/random_uav_ppo/evaluate.py --checkpoints RUN/initial.pt RUN/checkpoint.pt --episodes 10
+# 曲线：python methods/random_uav_ppo/plot_member.py RUN
+# seed 控制网络初始化、策略采样、批次打乱及派生的随机飞行子流。
+# 环境空间布局及 DAG 随机流由 config/env.toml 的 env_seed 独立控制。
+# 留出评估默认从 epoch 1000000 开始，所有策略保持相同场景、时长、DAG 和飞行轨迹。
+[train]
+episodes = 500
+seed = 45
+device = "cpu"
+torch_threads = 1
+hidden = 128
+rollout_slots = 8
+ppo_epochs = 4
+minibatch_size = 256
+learning_rate = 0.0003
+member_gamma = 1.0
+gae_lambda = 0.95
+clip_ratio = 0.2
+entropy_coef = 0.01
+value_coef = 0.5
+max_grad_norm = 0.5
+output_root = "results"
+diagnostics_interval = 5
+log_interval = 5
+# 每 10 个时隙记录 metrics，另保留每轮末尾；汇总仍使用全部时隙。
+metrics_interval = 10
+# 最多保留 initial.pt、checkpoint.pt、snapshot.pt；后两者原子覆盖。
+# snapshot.pt 首轮及每 10 轮更新，checkpoint.pt 每轮更新。
+snapshot_interval = 10
+
+# 每 10 个时隙为所有 UAV 独立采样 [a_x, a_y]，各分量均匀分布于 [-1, 1]。
+# 预测位置将越界时反转对应分量；允许跨区域和区域暂时没有 Member。
+# 飞行子流由 seed 派生，与 episode 编号共同决定轨迹。
+
+# 两次采样之间保持动作向量，遇外边界反转对应分量；设为 1 可逐时隙采样。
+resample_slots = 10

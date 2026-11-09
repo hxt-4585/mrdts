@@ -1,0 +1,27 @@
+[train]
+member_checkpoint = "results/random_uav_ppo/seed_45/train_20261107T093307_159247Z_87ce3318/checkpoint.pt"
+# Used only by the final paired comparison; never a training/initialization input.
+cem_reference = "results/centralized_cem/seed_45/20261107T122755_060867Z/checkpoint.pt"
+seed = 45
+workers = 2
+episodes = 60
+train_slots = 500
+evaluation_slots = 500
+train_epoch_start = 400000
+validation_epochs = [1500000, 1500001, 1500002]
+test_epochs = [2500000, 2500001, 2500002, 2500003, 2500004, 2500005, 2500006, 2500007, 2500008, 2500009]
+validation_interval = 5
+hidden = 64
+learning_rate = 0.001
+replay_size = 4096
+batch_size = 64
+fit_interval = 4
+fit_steps = 2
+warmup_samples = 128
+rounds = 3
+gradient_rate = 0.02
+exploration_start = 1.0
+exploration_end = 0.15
+exploration_hold = 64
+final_test = true
+output_root = "results/distributed_delay"

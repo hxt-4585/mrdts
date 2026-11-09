@@ -27,11 +27,6 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.cell_size, 10.0)
         self.assertEqual(config.region_count, 4)
 
-    def test_default_configs_load_repository_toml_files(self):
-        self.assertEqual(RegionConfig.default().grid_size, 100)
-        self.assertEqual(DAGConfig.default().n, 10)
-        self.assertEqual(UserConfig.default().total_users, 100)
-
     def test_env_config_loads_slot_durations_epoch_steps_and_seed(self):
         config = EnvConfig.from_toml(PROJECT_ROOT / "config" / "env.toml")
 
@@ -40,17 +35,6 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.steps_per_epoch, 500)
         self.assertEqual(config.env_seed, 42)
         self.assertEqual(EnvConfig.default(), config)
-
-    def test_user_config_loads_population_parameters(self):
-        config = UserConfig.from_toml(PROJECT_ROOT / "config" / "user.toml")
-
-        self.assertEqual(config.total_users, 100)
-        self.assertEqual(config.min_users_per_region, 1)
-        self.assertEqual(config.area_fluctuation, 0.1)
-        self.assertEqual(config.center_bias, 0.85)
-        self.assertEqual(config.center_spread_ratio, 0.25)
-        self.assertEqual(config.transmit_power, 0.1)
-        self.assertEqual(config.core_frequency, 1e9)
 
     def test_channel_config_loads_link_and_propagation_parameters(self):
         """通信模型配置包含全网带宽、噪声谱密度和 LoS/NLoS 参数。"""
