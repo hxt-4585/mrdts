@@ -47,7 +47,7 @@ class TestLocalFallback(unittest.TestCase):
         self.assertEqual(result.failed_dags, (local.key, managed.key))
         self.assertEqual(result.slot_end, 10.)
         self.assertEqual({key: reward.compute_delay() for key, reward in runtime.pop_member_rewards().items()},
-                         dict.fromkeys(managed.task_keys, -.5))
+                         dict.fromkeys(managed.task_keys, 0.))
 
     def test_zero_duration_local_tasks_and_independent_ground_devices(self):
         runtime, members, grounds, bs = make_runtime(duration=1.)
