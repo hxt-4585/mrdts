@@ -58,7 +58,7 @@ class Adapter:
         for index, key in enumerate(keys):
             full = self.env.observe_member(key)
             observations[index, :queue_start] = full[:queue_start]
-            observations[index, queue_start:] = full[queue_stop:]
+            observations[index, queue_start:] = full[queue_stop:-1]
         regions = self.env.members.region_ids[:self.count]
         masks = np.ones((len(keys), self.count + 2), bool)
         masks[:, :self.count] = regions[None, :] == regions[[key.owner_member_id for key in keys], None]
@@ -113,13 +113,15 @@ def collect_slot(adapter, model, *, deterministic=False, member_gamma=1., gae_la
                                      for key, action in zip(keys, actions)})
         for key, reward in env.pop_member_rewards().items():
             completed = (runtime.tasks[key].compute_finish_at - origin) / duration
-            event.completions.append((key.owner_member_id, completed, reward))
-            owner_rewards[key.owner_member_id] += reward
+            delay_reward = reward.compute_delay()
+            event.completions.append((key.owner_member_id, completed, delay_reward))
+            owner_rewards[key.owner_member_id] += delay_reward
     result = env.end_step()
     for key, reward in result.member_rewards.items():
+        delay_reward = reward.compute_delay()
         events[-1].completions.append((key.owner_member_id,
-                                      (runtime.tasks[key].compute_finish_at - origin) / duration, reward))
-        owner_rewards[key.owner_member_id] += reward
+                                      (runtime.tasks[key].compute_finish_at - origin) / duration, delay_reward))
+        owner_rewards[key.owner_member_id] += delay_reward
     times = np.array([e.time for e in events] + [(result.slot_result.slot_end - origin) / duration])
     values = np.array([e.values for e in events], dtype=np.float32).reshape(-1, count)
     rewards = np.zeros_like(values)

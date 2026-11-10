@@ -15,7 +15,7 @@ class MemberPolicy(nn.Module):
 
     @staticmethod
     def inputs(env, key):
-        obs = env.observe_member(key).astype(np.float32)
+        obs = env.observe_member(key)[:-1].astype(np.float32)
         count = env.members.member_uav_count
         mask = np.ones(count + 2, bool)
         regions = env.members.region_ids[:count]

@@ -93,7 +93,7 @@ def member_inputs(env, keys):
     for row, key in enumerate(keys):
         full = env.observe_member(key)
         observations[row, :start] = full[:start]
-        observations[row, start:] = full[stop:]
+        observations[row, start:] = full[stop:-1]
         masks[row, :count] = regions == regions[key.owner_member_id]
     return observations, masks
 
@@ -144,11 +144,11 @@ def collect_slot(env, model, actions, config, deterministic=False):
         ready = env.submit_schedule(placements)
         for key, reward in env.pop_member_rewards().items():
             completions.append((key.owner_member_id, (runtime.tasks[key].compute_finish_at - origin) / duration,
-                                reward, len(events) - 1))
+                                reward.compute_delay(), len(events) - 1))
     result = env.end_step()
     for key, reward in result.member_rewards.items():
         completions.append((key.owner_member_id, (runtime.tasks[key].compute_finish_at - origin) / duration,
-                            reward, len(events) - 1))
+                            reward.compute_delay(), len(events) - 1))
     times = np.asarray([event.time for event in events] + [(result.slot_result.slot_end - origin) / duration])
     values = np.asarray([event.values for event in events], dtype=np.float32).reshape(-1, count)
     rewards, owner_rewards = bucket_rewards(times[:-1], count, completions, config['member_gamma'])

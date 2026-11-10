@@ -94,7 +94,7 @@ class FrozenSimulation:
     def decision(self, key):
         raw = self.env.observe_member(key)
         split = 4 + 4 * self.count
-        observation = torch.from_numpy(np.delete(raw, np.s_[split:split + self.count])).float()
+        observation = torch.from_numpy(np.delete(raw[:-1], np.s_[split:split + self.count])).float()
         first, second, last = self.layers[key.owner_member_id]
         hidden = torch.tanh(F.linear(observation, *first))
         hidden = torch.tanh(F.linear(hidden, *second))

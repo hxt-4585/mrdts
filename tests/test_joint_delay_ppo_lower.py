@@ -118,7 +118,7 @@ class TestJointDelayPPOLower(unittest.TestCase):
             for sample in samples:
                 raw = raw_observations[sample.key]
                 np.testing.assert_array_equal(sample.observation,
-                    np.concatenate((raw[:4 + 4 * count], raw[4 + 5 * count:])).astype(np.float32))
+                    np.concatenate((raw[:4 + 4 * count], raw[4 + 5 * count:-1])).astype(np.float32))
                 np.testing.assert_array_equal(sample.mask[:count],
                     env.members.region_ids[:count] == env.members.region_ids[owner])
                 self.assertTrue(sample.mask[count:].all())
@@ -187,7 +187,8 @@ class TestJointDelayPPOLower(unittest.TestCase):
         for handle in handles:
             handle.remove()
         samples = [sample for sequence in trajectory.values() for sample in sequence]
-        self.assertEqual({sample.key: sample.reward for sample in samples}, received)
+        self.assertEqual({sample.key: sample.reward for sample in samples},
+                         {key: reward.compute_delay() for key, reward in received.items()})
         self.assertEqual(len(received), row['member_decisions'])
         self.assertFalse(any(gradient_flags))
         active = {owner for owner, sequence in trajectory.items() if sequence}

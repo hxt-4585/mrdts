@@ -66,12 +66,13 @@ class MemberObservation:
         )
 
     def build(self, task_key: TaskKey, runtime: SchedulingRuntime) -> np.ndarray:
-        """返回 (6M+8,) 向量；调用方选择前驱均已完成的待调度子任务。
+        """返回 (6M+9,) 向量；调用方选择前驱均已完成的待调度子任务。
 
         各段依次为：计算量/C_max、输入 bit/(D_max_Kbit*1000)、
         前驱位置 multi-hot (M+2)、当前 Member one-hot (M)、
         区域位置 (2M，按 ID 存放 x/L、y/L)、区域能量队列 (M，Q/E)、
-        计算等待时间 (M+2，除以固定调度窗口长度)、当前用户位置 (2，x/L、y/L)。
+        计算等待时间 (M+2，除以固定调度窗口长度)、当前用户位置 (2，x/L、y/L)、
+        当前 owner 未完成 DAG 数占本窗口全部 DAG 的比例 (1，分母含无 owner 的 DAG)。
         前驱位置和等待时间均按全局 Member ID、BS、当前任务所属用户的顺序排列。
         位置、能量队列和 Member 计算等待时间仅显示本区域（含自身），其余置零；
         能量队列在已入账值上补入原始输入已到达目标 UAV 的活动任务完整计算能耗，
@@ -86,7 +87,7 @@ class MemberObservation:
         member_id = task_key.owner_member_id
         member_count = self.members.member_uav_count
         ground = EntityRef(EntityKind.GROUND_DEVICE, task_key.user_id)
-        observation = np.zeros(6 * member_count + 8, dtype=float)
+        observation = np.zeros(6 * member_count + 9, dtype=float)
         observation[0] = task.cpu_cycles / self.dag_config.cpu_range[1]
         observation[1] = task.input_bits / (self.dag_config.input_data_range[1] * 1000.0)
 
@@ -124,12 +125,13 @@ class MemberObservation:
                 / self.members.config.member_slot_energy
             )
 
-        compute_wait = observation[4 + 5 * member_count:-2]
+        compute_wait = observation[4 + 5 * member_count:-3]
         duration = runtime.deadline - runtime.slot_start
         for member_id, node in enumerate(self._member_nodes):
             if visible[member_id]:
                 compute_wait[member_id] = runtime.servers[node].compute_wait(runtime.now) / duration
         compute_wait[member_count] = runtime.servers[runtime.global_bs].compute_wait(runtime.now) / duration
         compute_wait[member_count + 1] = runtime.servers[ground].compute_wait(runtime.now) / duration
-        np.divide(runtime.entity_positions[ground][:2], self.region.config.side_length, out=observation[-2:])
+        np.divide(runtime.entity_positions[ground][:2], self.region.config.side_length, out=observation[-3:-1])
+        observation[-1] = runtime.unfinished_dag_share(task_key.owner_member_id)
         return observation

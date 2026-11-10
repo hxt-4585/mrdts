@@ -13,7 +13,7 @@ from torch import nn
 from torch.distributions import Categorical, Normal
 from torch.nn import functional as F
 
-from methods.hmappo.diagnostics import empty_stats, rollout_stats, final_stats, grad_norm
+from methods.frozen_member_ppo.diagnostics import empty_stats, rollout_stats, final_stats, grad_norm
 
 
 def mlp(inputs, outputs, hidden, gain):

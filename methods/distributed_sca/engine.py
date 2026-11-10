@@ -91,7 +91,7 @@ class Simulator:
         count = env.members.member_uav_count
         full = env.observe_member(key)
         # This fixed source checkpoint predates the M energy-queue observations.
-        observation = np.concatenate((full[:4 + 4 * count], full[4 + 5 * count:])).astype(np.float32)
+        observation = np.concatenate((full[:4 + 4 * count], full[4 + 5 * count:-1])).astype(np.float32)
         hidden = torch.from_numpy(observation)
         actor = self.actors[key.owner_member_id]
         for weight, bias in actor[:-1]:

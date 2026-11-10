@@ -16,8 +16,8 @@ class TestMasterReward(unittest.TestCase):
             DAGResult((0, 1, 1), 13., False),
             DAGResult((1, 2, 2), 18., False),
         ), 100., 200., ())
-        self.assertEqual(MasterReward(2.).compute(slot), -2.)
-        self.assertEqual(MasterReward(4.).compute(slot), -1.)
+        self.assertEqual(MasterReward(2.).compute_delay(slot), -2.)
+        self.assertEqual(MasterReward(4.).compute_delay(slot), -1.)
         zeros = np.zeros(2)
         result = EndStepResult(slot, zeros, zeros, zeros, zeros, zeros, zeros, False,
                                scheduling_duration_s=2.)
@@ -25,7 +25,7 @@ class TestMasterReward(unittest.TestCase):
 
     def test_zero_delay(self):
         slot = SlotResult(7., 8., (DAGResult((0, 0, 0), 7., False),), 0., 0., ())
-        self.assertEqual(MasterReward(2.).compute(slot), 0.)
+        self.assertEqual(MasterReward(2.).compute_delay(slot), 0.)
 
 
 if __name__ == '__main__':

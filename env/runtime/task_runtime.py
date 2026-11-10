@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from enum import Enum
 
+import numpy as np
+
 from env.types import EntityRef, TaskKey
 
 
@@ -42,8 +44,11 @@ class TaskRuntime:
     compute_finish_at: float | None = None
     execution_core_id: int | None = None
     compute_energy_j: float = 0.0
+    member_energy_j: np.ndarray | None = None  # 当前任务的逐 Member 计算与发送能耗。
+    energy_virtual_queue_j: np.ndarray | None = None  # 完成时快照，尚未扣时隙预算。
     failed_at: float | None = None
     unfinished_dags_at_decision: int | None = None
+    unfinished_region_dags_at_decision: int | None = None  # 决策时 owner 所在区域的未完成 DAG 总数。
     managed_dag_count: int | None = None
 
     def mark_input_arrived(self, at: float) -> bool:

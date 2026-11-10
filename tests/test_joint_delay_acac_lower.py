@@ -100,7 +100,7 @@ class TestJointDelayLower(unittest.TestCase):
         observations, masks = member_inputs(env, keys)
         for row, key in enumerate(keys):
             full = env.observe_member(key)
-            np.testing.assert_array_equal(observations[row], np.concatenate((full[:4 + 4 * count], full[4 + 5 * count:])).astype(np.float32))
+            np.testing.assert_array_equal(observations[row], np.concatenate((full[:4 + 4 * count], full[4 + 5 * count:-1])).astype(np.float32))
             np.testing.assert_array_equal(masks[row, :count],
                 env.members.region_ids[:count] == env.members.region_ids[key.owner_member_id])
             self.assertTrue(masks[row, -2:].all())

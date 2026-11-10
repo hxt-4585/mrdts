@@ -15,7 +15,7 @@
 | 位置 | 当前内容 |
 |---|---|
 | `env/env.py` | `MRDTSEnv` 场景生成、重置、分阶段 step、观测调用与能耗结算 |
-| `env/step/observation.py` | Master 的 `(3M,)` 与 Member 的 `(6M+8,)` 观测及信息可见范围 |
+| `env/step/observation.py` | Master 的 `(3M,)` 与 Member 的 `(6M+9,)` 观测及信息可见范围 |
 | `env/step/reward.py` | Master 系统级时隙奖励（所有 Master 共享）和 Member 子任务级奖励框架，公式未实现、未接入 |
 | `env/types.py`、`env/contracts.py` | 实体和任务标识、DAG 请求、放置决策及 step 返回结构 |
 | `env/entities/` | 区域、用户、UAV 与基站状态及资源 |

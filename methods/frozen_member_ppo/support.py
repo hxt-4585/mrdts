@@ -1,25 +1,13 @@
-"""HMAPPO 独立的场景初始化、指标统计和结果文件辅助函数。"""
+"""冻结 Member 策略的场景初始化、指标统计和结果文件辅助函数。"""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import subprocess
 
 from env.env import MRDTSEnv
-from env.settings import ChannelConfig, DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-def resolved_settings(users=None, dag_nodes=None):
-    settings = dict(region=RegionConfig.default(), user=UserConfig.default(),
-                    uav=UAVConfig.default(), channel=ChannelConfig.default(),
-                    dag=DAGConfig.default(), env=EnvConfig.default())
-    if users is not None:
-        settings['user'] = replace(settings['user'], total_users=users)
-    if dag_nodes is not None:
-        settings['dag'] = replace(settings['dag'], n=dag_nodes)
-    return settings
 
 
 def build_scene(settings, *, episode):
@@ -48,13 +36,6 @@ def slot_metrics(result, episode, slot, flight_violations):
                 delay_sum_s=delay_sum,
                 mean_delay_s=delay_sum / count if count else None,
                 flight_violations=flight_violations)
-
-
-def summarize(rows):
-    summary = MetricSummary()
-    for row in rows:
-        summary.add(row)
-    return summary.result()
 
 
 @dataclass

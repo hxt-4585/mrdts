@@ -1,6 +1,6 @@
 [population]
 # 全局地面用户总数。
-total_users = 20
+total_users = 50
 # 每个区域至少分配的用户数量。
 min_users_per_region = 1
 # 按区域面积分配用户时施加的相对浮动上限，例如 0.1 表示 ±10%。

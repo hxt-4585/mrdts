@@ -31,7 +31,7 @@ class Adapter:
         for row, key in enumerate(keys):
             observation = env.observe_member(key)
             observations[row, :energy_start] = observation[:energy_start]
-            observations[row, energy_start:] = observation[energy_stop:]
+            observations[row, energy_start:] = observation[energy_stop:-1]
         regions = env.members.region_ids[:self.members]
         masks = np.ones((len(keys), self.members + 2), dtype=bool)
         masks[:, :self.members] = regions[None, :] == regions[[key.owner_member_id for key in keys], None]
@@ -85,10 +85,10 @@ def collect_slot(adapter, members, *, deterministic=False, member_gamma=1., gae_
             placements[key] = PlacementDecision(adapter.execution_node(int(sample.action), key))
         ready = env.submit_schedule(placements)
         for key, reward in env.pop_member_rewards().items():
-            pending.pop(key).reward = reward
+            pending.pop(key).reward = reward.compute_delay()
     result = env.end_step()
     for key, reward in result.member_rewards.items():
-        pending.pop(key).reward = reward
+        pending.pop(key).reward = reward.compute_delay()
     samples = {owner: finish_trajectory(trajectory, 0., member_gamma, gae_lambda)
                for owner, trajectory in trajectories.items()}
     metrics = slot_metrics(result.slot_result, env.epoch_index, env.step_index - 1,

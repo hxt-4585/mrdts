@@ -29,6 +29,20 @@ class TestMemberEnergyObservation(unittest.TestCase):
         observation = self.env._member_observation.build(key, self.runtime)
         return observation[4 + 4 * self.count:4 + 5 * self.count] * self.env.members.config.member_slot_energy
 
+    def test_owner_unfinished_share_uses_all_registered_dags(self):
+        first = request(self.members[0], self.grounds[0], inputs=(0., 0.), cycles=(0., 0.))
+        second = request(self.members[0], self.grounds[0], dag_id=1)
+        other = request(self.members[1], self.grounds[1])
+        local = request(None, self.grounds[2], cycles=(0.,))
+        self.runtime.register_dags([first, second, other, local])
+        observe = self.env._member_observation.build
+        self.assertEqual(observe(first.task_keys[0], self.runtime)[-1], 2 / 4)
+        self.assertEqual(observe(other.task_keys[0], self.runtime)[-1], 1 / 4)
+        self.runtime.submit_placements({first.task_keys[0]: PlacementDecision(self.grounds[0])})
+        self.assertEqual(observe(first.task_keys[1], self.runtime)[-1], 2 / 4)
+        self.runtime.submit_placements({first.task_keys[1]: PlacementDecision(self.grounds[0])})
+        self.assertEqual(observe(second.task_keys[0], self.runtime)[-1], 1 / 4)
+
     def test_running_and_fifo_energy_is_read_only_and_transfers_are_excluded(self):
         dags = [request(self.members[i], self.grounds[i], inputs=(bits, 0.),
                         cycles=(cycles, 0.))

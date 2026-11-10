@@ -23,8 +23,8 @@ import torch
 
 from methods.random_uav_ppo.support import settings_from_snapshot
 from methods.frozen_member_ppo.run import frozen_policies
-from methods.hmappo.rollout import Adapter, collect_slot
-from methods.hmappo.support import build_scene, MetricSummary, write_json
+from methods.frozen_member_ppo.rollout import Adapter, collect_slot
+from methods.frozen_member_ppo.support import build_scene, MetricSummary, write_json
 from methods.random_uav_ppo.flight import RandomFlight
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,8 +67,8 @@ def evaluate_job(job):
             else:
                 actions = destination_actions(ENV.members.positions[:count, :2], targets,
                                               ENV.region.config.side_length, full_step)
-            _, _, row = collect_slot(ADAPTER, None, MEMBERS, flight_actions=actions,
-                                    member_deterministic=True, boundary_penalty=1.)
+            _, row = collect_slot(ADAPTER, None, MEMBERS, flight_actions=actions,
+                                    boundary_penalty=1.)
             summary.add(row)
     return dict(policy=label, epoch=epoch, **summary.result())
 

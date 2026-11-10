@@ -73,7 +73,7 @@ def collect_slot(env, model, actions, config, deterministic=False):
             raw = env.observe_member(key)
             observation = np.empty(5 * count + 8, dtype=np.float32)
             observation[:4 + 4 * count] = raw[:4 + 4 * count]
-            observation[4 + 4 * count:] = raw[4 + 5 * count:]
+            observation[4 + 4 * count:] = raw[4 + 5 * count:-1]
             mask = np.ones(count + 2, dtype=bool)
             mask[:count] = masks[member]
             inputs.append((member, key, observation, mask))
@@ -92,10 +92,10 @@ def collect_slot(env, model, actions, config, deterministic=False):
             placements[key] = PlacementDecision(endpoint)
         ready = env.submit_schedule(placements)
         for key, reward in env.pop_member_rewards().items():
-            pending.pop(key).reward = reward
+            pending.pop(key).reward = reward.compute_delay()
     result = env.end_step()
     for key, reward in result.member_rewards.items():
-        pending.pop(key).reward = reward
+        pending.pop(key).reward = reward.compute_delay()
     for samples in trajectory.values():
         finish_trajectory(samples, config['member_gamma'], config['gae_lambda'])
     slot = result.slot_result

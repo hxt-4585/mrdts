@@ -1,19 +1,13 @@
-"""只在 method 侧适配 MRDTSEnv：固定两层策略采样，按 owner 保存异步轨迹。
-
-低层优化本时隙内的环境 MemberReward，时隙结束视为低层终止；默认 gamma=1
-表示按决策序列累计成本，不对不等长的事件间隔额外折扣。高层跨时隙学习。
-Master 采用参数共享 CTDE，Member 按固定 ID 独立训练 PPO，仅使用局部观测。
-不声称两层局部奖励严格等价于单一全局目标。
-"""
+"""冻结 Member 策略执行调度，按时隙收集 Master 样本和评估指标。"""
 
 import numpy as np
 import torch
 
 from env.contracts import PlacementDecision
 from env.types import EntityKind, EntityRef
-from methods.hmappo.ers import ERS
-from methods.hmappo.support import slot_metrics
-from methods.hmappo.ppo import Policy, Sample, finish_trajectory
+from methods.frozen_member_ppo.ers import ERS
+from methods.frozen_member_ppo.support import slot_metrics
+from methods.frozen_member_ppo.ppo import Policy, Sample
 
 
 class Adapter:
@@ -62,7 +56,7 @@ class Adapter:
         for row, key in enumerate(keys):
             observation = env.observe_member(key)
             observations[row, :energy_start] = observation[:energy_start]
-            observations[row, energy_start:] = observation[energy_stop:]
+            observations[row, energy_start:] = observation[energy_stop:-1]
         regions = env.members.region_ids[:self.members]
         masks = np.ones((len(keys), self.members + 2), dtype=bool)
         masks[:, :self.members] = regions[None, :] == regions[[key.owner_member_id for key in keys], None]
@@ -88,8 +82,7 @@ def decide(policy, inputs, deterministic):
             for obs, state, mask, action, lp, value in zip(observations, states, masks, actions, logp, values)]
 
 
-def collect_slot(adapter, master, members, *, deterministic=False, member_gamma=1., gae_lambda=.95,
-                 boundary_penalty=.1, flight_actions=None, member_deterministic=None):
+def collect_slot(adapter, master, members, *, deterministic=False, boundary_penalty=.1, flight_actions=None):
     env = adapter.env
     if flight_actions is None:
         master_samples = decide(master, adapter.master_inputs(), deterministic)
@@ -99,47 +92,42 @@ def collect_slot(adapter, master, members, *, deterministic=False, member_gamma=
         master_samples = []
         actions = flight_actions
         ownership = env.masters.region_ids[:, None] == env.members.region_ids[None, :adapter.members]
-    if member_deterministic is None:
-        member_deterministic = deterministic
     positions_before = env.members.positions[:adapter.members, :2].copy()
     begin = env.begin_step(actions.reshape(adapter.members, 2))
     displacement = np.linalg.norm(env.members.positions[:adapter.members, :2] - positions_before, axis=1)
     plan = ERS(env._runtime).plan(begin.requests)
     orders = {node.index: iter(order) for node, order in plan.member_orders.items()}
-    trajectories = {owner: [] for owner in orders}
-    pending = {}
+    member_reward_sum = 0.
+    member_decisions = 0
+    device = next(members.parameters()).device
     ready = begin.ready_member_ids
     while ready:
         keys = [next(orders[owner]) for owner in ready]
-        inputs = adapter.member_inputs(keys)
+        observations, _, masks = adapter.member_inputs(keys)
+        observations = torch.as_tensor(observations, device=device)
+        masks = torch.as_tensor(masks, device=device)
         placements = {}
         for row, key in enumerate(keys):
-            sample = decide(members[key.owner_member_id],
-                            tuple(values[row:row + 1] for values in inputs), member_deterministic)[0]
-            pending[key] = sample
-            trajectories[key.owner_member_id].append(sample)
-            placements[key] = PlacementDecision(adapter.execution_node(int(sample.action), key))
+            logits = members[key.owner_member_id].actor(observations[row:row + 1])
+            action = int(logits.masked_fill(~masks[row], -torch.inf).argmax())
+            placements[key] = PlacementDecision(adapter.execution_node(action, key))
+        member_decisions += len(keys)
         ready = env.submit_schedule(placements)
-        for key, reward in env.pop_member_rewards().items():
-            pending.pop(key).reward = reward
+        member_reward_sum += sum(reward.compute_delay() for reward in env.pop_member_rewards().values())
     result = env.end_step()
-    for key, reward in result.member_rewards.items():
-        pending.pop(key).reward = reward
+    member_reward_sum += sum(reward.compute_delay() for reward in result.member_rewards.values())
     delay_reward = result.master_reward
     penalties = boundary_penalty * np.count_nonzero(ownership & begin.flight_violations, axis=1)
     penalty_sum = float(penalties.sum())
     for sample, penalty in zip(master_samples, penalties):
         # 采样 mask 保存飞行前归属；每个 Member 的 x/y 动作共用一个归属标记。
         sample.reward = delay_reward - penalty
-    member_samples = {owner: finish_trajectory(trajectory, 0., member_gamma, gae_lambda)
-                      for owner, trajectory in trajectories.items()}
     metrics = slot_metrics(result.slot_result, env.epoch_index, env.step_index - 1,
                            int(begin.flight_violations.sum()))
     metrics.update(master_reward=delay_reward,
                    master_training_reward_mean=delay_reward - penalty_sum / len(ownership),
                    master_boundary_penalty_sum=penalty_sum,
-                   member_reward_sum=sum(s.reward for samples in member_samples.values() for s in samples),
-                   member_decisions=sum(map(len, member_samples.values())),
+                   member_reward_sum=member_reward_sum, member_decisions=member_decisions,
                    total_energy_j=float(result.total_energy_j.sum()),
                    mean_energy_queue_j=float(result.energy_virtual_queue_j.mean()))
     metrics['flight_displacement_mean_m'] = float(displacement.mean())
@@ -149,7 +137,7 @@ def collect_slot(adapter, master, members, *, deterministic=False, member_gamma=
                         f'master_{owner}_flight_violations': int(np.count_nonzero(owned & begin.flight_violations)),
                         f'master_{owner}_displacement_mean_m': float(displacement[owned].mean()) if owned.any() else None,
                         f'master_{owner}_boundary_penalty': penalties[owner]})
-    return master_samples, member_samples, metrics
+    return master_samples, metrics
 
 
 @torch.no_grad()

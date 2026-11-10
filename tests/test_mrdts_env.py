@@ -186,7 +186,7 @@ class TestMRDTSEnv(unittest.TestCase):
         observation = environment.observe_member(keys[4])
 
         self.assertIsInstance(observation, np.ndarray)
-        self.assertEqual(observation.shape, (6 * count + 8,))
+        self.assertEqual(observation.shape, (6 * count + 9,))
         predecessors = np.zeros(count + 2)
         predecessors[[1, count - 1, count]] = 1
         identity = np.zeros(count)
@@ -198,7 +198,7 @@ class TestMRDTSEnv(unittest.TestCase):
         queues[[0, 2]] = [0.5, 2.0]
         expected = np.concatenate(
             ([0.5, 0.25], predecessors, identity, positions.ravel(), queues, np.zeros(count + 2),
-             environment.users.positions[0, :2].astype(float) / side_length)
+             environment.users.positions[0, :2].astype(float) / side_length, [1.0])
         )
         np.testing.assert_allclose(observation, expected)
         self.assertEqual(environment._runtime.now, 0.0)
@@ -244,8 +244,8 @@ class TestMRDTSEnv(unittest.TestCase):
         expected = np.zeros(count + 2)
         expected[[2, count, count + 1]] = 1.
         np.testing.assert_array_equal(observation[2:count + 4], expected)
-        np.testing.assert_allclose(observation[-2:], [.2, .8])
-        self.assertEqual(observation[-3], 0.)
+        np.testing.assert_allclose(observation[-3:-1], [.2, .8])
+        self.assertEqual(observation[-4], 0.)
 
         # 独立服务器快照验证本地等待项读取的是任务所属用户，而非用户 0。
         local = runtime.servers[ground]
@@ -259,8 +259,8 @@ class TestMRDTSEnv(unittest.TestCase):
         other.dispatch(runtime.now)
         refreshed = environment.observe_member(keys[4])
         duration = runtime.deadline - runtime.slot_start
-        self.assertAlmostEqual(refreshed[-3], 1.5 / duration)
-        self.assertEqual(observation[-3], 0.)
+        self.assertAlmostEqual(refreshed[-4], 1.5 / duration)
+        self.assertEqual(observation[-4], 0.)
         self.assertEqual(runtime.now, 0.)
 
     def test_member_observer_uses_current_runtime_and_returns_independent_arrays(self):
@@ -279,7 +279,7 @@ class TestMRDTSEnv(unittest.TestCase):
         environment._runtime.tasks[keys[4]].cpu_cycles *= 0.5
         after_reset = environment.observe_member(keys[4])
         self.assertEqual(after_reset[0], 0.25)
-        np.testing.assert_array_equal(after_reset[4 + 4 * environment.members.member_uav_count:-2], 0.0)
+        np.testing.assert_array_equal(after_reset[4 + 4 * environment.members.member_uav_count:-3], 0.0)
 
         environment.generate_scene()
         keys = self.register_member_tasks(environment)
@@ -317,15 +317,15 @@ class TestMRDTSEnv(unittest.TestCase):
         expected = np.zeros(count + 2)
         expected[0] = .8 / 2.
         expected[count] = 2.8 / 2.  # 允许超过 1，不截断截止窗口后的负载。
-        np.testing.assert_allclose(first[5 * count + 4:-2], expected)
+        np.testing.assert_allclose(first[5 * count + 4:-3], expected)
         self.assertEqual(runtime.now, 10.2)
 
         runtime.now = 10.5
         later = environment.observe_member(keys[4])
         expected[0] = .5 / 2.
         expected[count] = 2.5 / 2.
-        np.testing.assert_allclose(later[5 * count + 4:-2], expected)
-        self.assertAlmostEqual(first[-4], 1.4)
+        np.testing.assert_allclose(later[5 * count + 4:-3], expected)
+        self.assertAlmostEqual(first[-5], 1.4)
 
     def test_begin_step_moves_members_and_registers_tasks_against_updated_topology(self):
         environment = MRDTSEnv(self.settings())
@@ -398,8 +398,8 @@ class TestMRDTSEnv(unittest.TestCase):
         self.assertTrue(all(not server.queue and not server.running for server in runtime.servers.values()))
         key = next(key for key, task in runtime.tasks.items() if not task.predecessors)
         observation = environment.observe_member(key)
-        self.assertEqual(observation.shape, (6 * count + 8,))
-        np.testing.assert_array_equal(observation[5 * count + 4:-2], 0.)
+        self.assertEqual(observation.shape, (6 * count + 9,))
+        np.testing.assert_array_equal(observation[5 * count + 4:-3], 0.)
         self.assertEqual(runtime.now, 0.)
 
     def test_begin_step_uses_configured_resources_and_current_window_without_advancing_step(self):

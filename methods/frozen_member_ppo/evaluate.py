@@ -17,8 +17,8 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from methods.frozen_member_ppo.run import load_checkpoint, output_directory
-from methods.hmappo.rollout import Adapter, collect_slot
-from methods.hmappo.support import MetricSummary, write_json
+from methods.frozen_member_ppo.rollout import Adapter, collect_slot
+from methods.frozen_member_ppo.support import MetricSummary, write_json
 from methods.random_uav_ppo.flight import RandomFlight
 
 
@@ -50,8 +50,8 @@ def compare(checkpoint, *, episodes=10, epoch_start=1000000, device='cpu',
                         actions = flight.actions(env, slot)
                     elif label == 'hover':
                         actions = hover
-                    _, _, row = collect_slot(adapter, master, members, deterministic=True,
-                        member_deterministic=True, flight_actions=actions,
+                    _, row = collect_slot(adapter, master, members, deterministic=True,
+                        flight_actions=actions,
                         boundary_penalty=saved['config']['boundary_penalty'])
                     summary.add(row)
                     total.add(row)

@@ -12,6 +12,6 @@ delta = 0.5
 # 每个子任务原始输入数据量范围，单位：Kbit，闭区间。
 input_data_range = [100, 300]
 # 每个子任务计算量范围，单位：CPU cycles。
-cpu_range = [10000000.0, 50000000.0]
+cpu_range = [10000000.0, 100000000.0]
 # DAG 依赖边的中间结果数据量范围，单位：Kbit，闭区间。
 intermediate_data_range = [50, 200]

@@ -58,12 +58,16 @@ class SchedulingRuntime:
         max_duration_s: float | None = None,
         on_member_energy: Callable[[EntityRef, float], None] | None = None,
         on_time_advance: Callable[[float], None] | None = None,
+        energy_virtual_queue_j: np.ndarray | None = None,
     ):
         self._slot_start = float(slot_start)
         duration = float(max_duration_s if max_duration_s is not None else EnvConfig.default().scheduling_duration_s)
         self._deadline = self._slot_start + duration
-        self._member_reward = MemberReward(duration)
-        self._member_rewards: dict[TaskKey, float] = {}
+        self._scheduling_duration_s = duration
+        self._member_rewards: dict[TaskKey, MemberReward] = {}
+        self._completed_tasks: list[TaskKey] = []
+        # 只读取环境的实时队列；更新仍由能耗回调及 end_step 负责。
+        self._energy_virtual_queue_j = energy_virtual_queue_j
         self._managed_dags: dict[int, int] = defaultdict(int)
         self._unfinished_dags: dict[int, int] = defaultdict(int)
         self._closed = False
@@ -127,6 +131,10 @@ class SchedulingRuntime:
         """当前可接受下一次决策的 Member；不替 method 选择任务。"""
         return tuple(sorted(self._ready_members))
 
+    def unfinished_dag_share(self, member_id: int) -> float:
+        """当前 owner 未完成的 DAG 数占本窗口全系统登记 DAG 总数的比例。"""
+        return self._unfinished_dags[member_id] / len(self.dag_runtimes)
+
     def register_dags(self, requests: Iterable[DAGRequest]) -> tuple[TaskKey, ...]:
         """在首次决策前登记本窗口全部 DAG，固定各 Member 管理总数。"""
         keys = []
@@ -142,6 +150,7 @@ class SchedulingRuntime:
                 self.tasks[key] = TaskRuntime(
                     key=key, cpu_cycles=float(features[1]), input_bits=float(features[0]) * 1000.,
                     predecessors=predecessors[key],
+                    member_energy_j=np.zeros(len(self._member_energy)),
                 )
             keys.extend(node_keys)
             if request.owner_member is None:
@@ -184,6 +193,11 @@ class SchedulingRuntime:
             task.decision_at = self.now
             # 观测与本批提交之间不推进时间，完成事件也在整批提交后处理。
             task.unfinished_dags_at_decision = self._unfinished_dags[key.owner_member_id]
+            owner_region = self.member_regions[request.owner_member]
+            task.unfinished_region_dags_at_decision = sum(
+                self._unfinished_dags[member.index]
+                for member, region in self.member_regions.items() if region == owner_region
+            )
             task.managed_dag_count = self._managed_dags[key.owner_member_id]
             task.status = TaskStatus.WAITING_DATA
             self.active_tasks[key.owner_member_id] = key
@@ -246,7 +260,23 @@ class SchedulingRuntime:
                 else:
                     self._handle_transfer_finish(payload, timestamp)
             self._dispatch(timestamp)
+            # 零时长作业可能继续在当前时刻完成，闭包完成后再生成快照。
+            if not self._events or self._events[0][0] != timestamp:
+                self._record_completed_rewards()
         self._advance_clock(absolute_time)
+
+    def _record_completed_rewards(self) -> None:
+        if not self._completed_tasks:
+            return
+        queues = (None if self._energy_virtual_queue_j is None
+                  else self._energy_virtual_queue_j.copy())
+        for key in self._completed_tasks:
+            task = self.tasks[key]
+            task.energy_virtual_queue_j = queues
+            self._member_rewards[key] = MemberReward(
+                task, len(self.dag_runtimes), self._scheduling_duration_s,
+            )
+        self._completed_tasks.clear()
 
     def _advance_clock(self, at: float) -> None:
         elapsed = at - self.now
@@ -273,11 +303,13 @@ class SchedulingRuntime:
         if source.kind is EntityKind.MEMBER_UAV:
             binding = self._transfer_bindings[transfer_id]
             binding.record.tx_energy_j += energy
+            self.tasks[binding.task_key].member_energy_j[source.index] += energy
             self._record_member_energy(source, energy, 1)
 
     def _settle_compute_energy(self, node: EntityRef, record: ComputeRecord, energy: float) -> None:
         if node.kind is EntityKind.MEMBER_UAV:
             self.tasks[record.task_key].compute_energy_j = energy
+            self.tasks[record.task_key].member_energy_j[node.index] += energy
             self._record_member_energy(node, energy, 0)
 
     def finish_slot(self) -> SlotResult:
@@ -323,8 +355,8 @@ class SchedulingRuntime:
     def trace(self, task_key: TaskKey) -> TaskRuntime:
         return self.tasks[task_key]
 
-    def pop_member_rewards(self) -> dict[TaskKey, float]:
-        """领取自上次领取以来实际完成的任务奖励；每条奖励仅返回一次。"""
+    def pop_member_rewards(self) -> dict[TaskKey, MemberReward]:
+        """领取已完成任务的三个指标；每个 TaskKey 仅返回一次。"""
         rewards = self._member_rewards
         self._member_rewards = {}
         return rewards
@@ -441,7 +473,7 @@ class SchedulingRuntime:
         member_id = task.key.owner_member_id
         if dag.is_finished:
             self._unfinished_dags[member_id] -= 1
-        self._member_rewards[task.key] = self._member_reward.compute(task)
+        self._completed_tasks.append(task.key)
         del self.active_tasks[member_id]
         self._remaining_tasks[member_id] -= 1
         if self._remaining_tasks[member_id]:

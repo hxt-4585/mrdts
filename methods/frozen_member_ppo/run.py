@@ -25,9 +25,9 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from methods.random_uav_ppo.support import settings_from_snapshot
-from methods.hmappo.ppo import finish_trajectory, update
-from methods.hmappo.rollout import Adapter, collect_slot, master_bootstrap
-from methods.hmappo.support import build_scene, MetricSummary, write_json, git_output
+from methods.frozen_member_ppo.ppo import finish_trajectory, update
+from methods.frozen_member_ppo.rollout import Adapter, collect_slot, master_bootstrap
+from methods.frozen_member_ppo.support import build_scene, MetricSummary, write_json, git_output
 
 
 def output_directory(root, mode, seed):
@@ -134,8 +134,8 @@ def train(*, member_checkpoint, episodes=500, slots=None, seed=45, device='cpu',
                     trajectories = [[] for _ in range(adapter.masters)]
                     stop = min(start + rollout_slots, env.env_config.steps_per_epoch)
                     for _ in range(start, stop):
-                        high, _, row = collect_slot(adapter, master, members,
-                            member_deterministic=True, boundary_penalty=boundary_penalty)
+                        high, row = collect_slot(adapter, master, members,
+                            boundary_penalty=boundary_penalty)
                         for owner, (trajectory, sample) in enumerate(zip(trajectories, high)):
                             trajectory.append(sample)
                             master_reward_sums[owner] += sample.reward

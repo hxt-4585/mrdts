@@ -12,6 +12,7 @@ from env.entities.uav import MasterUAV, MemberUAV
 from env.entities.user import User
 from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 from env.step.observation import MasterObservation, MemberObservation
+from env.step.reward import MemberReward
 from env.types import EntityKind, EntityRef, TaskKey
 from env.workload.dag_generator import DAGGenerator
 
@@ -101,7 +102,7 @@ class MRDTSEnv:
         return self._master_observation.build(master_id)
 
     def observe_member(self, task_key: TaskKey) -> np.ndarray:
-        """返回待调度子任务及其 owner Member 的 (6M+8,) 观测，末两项为所属用户位置。"""
+        """返回待调度子任务及其 owner Member 的 (6M+9,) 观测，最后三项为用户坐标和 owner 未完成 DAG 占比。"""
         return self._member_observation.build(task_key, self._runtime)
 
     def begin_step(self, flight_actions: np.ndarray) -> BeginStepResult:
@@ -142,12 +143,14 @@ class MRDTSEnv:
         self._runtime.submit_placements(placements)
         return self._runtime.advance_to_decision()
 
-    def pop_member_rewards(self) -> dict[TaskKey, float]:
-        """在 begin_step 与 end_step 之间领取已完成任务的奖励。
+    def pop_member_rewards(self) -> dict[TaskKey, MemberReward]:
+        """在 begin_step 与 end_step 之间领取已完成任务的三个指标。
 
         通常在 submit_schedule 后调用；按 TaskKey 对应各 owner 的原动作，
         不保证属于刚提交的批次。尚在执行的任务不返回奖励，重复领取为空。
         end_step 会在结果中返回剩余未领取奖励。
+        能耗按 Member ID 区分；队列为完成时尚未扣预算的快照。
+        对象中的数组由调用方只读使用。
         """
         return self._runtime.pop_member_rewards()
 
@@ -251,6 +254,7 @@ class MRDTSEnv:
             max_duration_s=self.env_config.scheduling_duration_s,
             on_member_energy=self._record_member_energy,
             on_time_advance=self._record_hover_energy,
+            energy_virtual_queue_j=members.energy_virtual_queue_j,
         )
 
     def _generate_dag_requests(self) -> tuple[DAGRequest, ...]:

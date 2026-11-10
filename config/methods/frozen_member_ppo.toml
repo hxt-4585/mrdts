@@ -20,7 +20,7 @@ clip_ratio = 0.2
 entropy_coef = 0.01
 value_coef = 0.5
 max_grad_norm = 0.5
-# 与 HMAPPO 一致，每个越界 UAV 惩罚其飞行前所属 Master。
+# 每个越界 UAV 惩罚其飞行前所属 Master。
 boundary_penalty = 1.0
 output_root = "results"
 # episodes.csv 每个 episode 一行；控制台打印全体 Master 训练奖励总和及平均 DAG 时延。
