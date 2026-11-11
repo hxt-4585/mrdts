@@ -15,7 +15,6 @@ from env.settings import EnvConfig
 from env.runtime.channel_queue import DirectedChannelState, TransferJob
 from env.runtime.communication_resources import allocate_transfers
 from env.runtime.dag_runtime import DAGRuntime
-from env.runtime.local_delay import LocalDelayEstimator
 from env.runtime.server_queue import ComputeRecord, ServerState
 from env.runtime.slot_result import DAGResult, MemberEnergyResult, SlotResult
 from env.runtime.task_runtime import TaskRuntime, TaskStatus, TransferRecord
@@ -64,6 +63,7 @@ class SchedulingRuntime:
         self._slot_start = float(slot_start)
         duration = float(max_duration_s if max_duration_s is not None else EnvConfig.default().scheduling_duration_s)
         self._deadline = self._slot_start + duration
+        self._scheduling_duration_s = duration
         self._member_rewards: dict[TaskKey, MemberReward] = {}
         self._completed_tasks: list[TaskKey] = []
         # 只读取环境的实时队列；更新仍由能耗回调及 end_step 负责。
@@ -162,7 +162,6 @@ class SchedulingRuntime:
             self._remaining_tasks[member_id] += len(node_keys)
             if node_keys and member_id not in self.active_tasks:
                 self._ready_members.add(member_id)
-        self._local_delay_estimator = LocalDelayEstimator(self)
         self._dispatch(self.now)
         self._process_events_until(self.now)
         return tuple(keys)
@@ -187,15 +186,7 @@ class SchedulingRuntime:
         调用方先基于同一时刻的状态完成本批全部观测与策略选择，再提交。
         TaskKey 仅用于同时提交时的稳定平局顺序，不代表策略优先级。
         """
-        # 所有本地对照使用同一批动作提交前的资源状态。
-        keys = sorted(placements)
-        for key in keys:
-            request = self._requests[key.owner_member_id, key.user_id, key.dag_id]
-            if placements[key].execution_node != request.ground_device:
-                self.tasks[key].local_mean_delay_at_decision_s = (
-                    self._local_delay_estimator.mean_delay(key.owner_member_id, first=key)
-                )
-        for key in keys:
+        for key in sorted(placements):
             task = self.tasks[key]
             request = self._requests[key.owner_member_id, key.user_id, key.dag_id]
             task.execution_node = placements[key].execution_node
@@ -282,13 +273,9 @@ class SchedulingRuntime:
         for key in self._completed_tasks:
             task = self.tasks[key]
             task.energy_virtual_queue_j = queues
-            request = self._requests[key.owner_member_id, key.user_id, key.dag_id]
-            # 本地动作与本地对照是同一分支，收益恒为零。
-            delay_improvement_s = 0.0
-            if task.execution_node != request.ground_device:
-                delay_improvement_s = (task.local_mean_delay_at_decision_s
-                                       - self._local_delay_estimator.mean_delay(key.owner_member_id))
-            self._member_rewards[key] = MemberReward(task, delay_improvement_s)
+            self._member_rewards[key] = MemberReward(
+                task, len(self.dag_runtimes), self._scheduling_duration_s,
+            )
         self._completed_tasks.clear()
 
     def _advance_clock(self, at: float) -> None:

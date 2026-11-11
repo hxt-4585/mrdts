@@ -27,7 +27,6 @@ class TestEndStep(unittest.TestCase):
         with patch.object(env, '_generate_dag_requests', return_value=(dag,)):
             env.begin_step(np.zeros((count, 2)))
         runtime = env._runtime
-        expected_delay_gain = .25 * frequency / runtime.servers[ground].core_frequencies[0] - .25
         after_flight = env.members.energy_virtual_queue_j.copy()
         hover_power = float(env.members.propulsion_power(0.))
         compute = env.members.config.member_capacitance_factor * .25 * frequency**3
@@ -40,13 +39,13 @@ class TestEndStep(unittest.TestCase):
         expected_energy = np.zeros(count)
         expected_energy[1] = compute
         np.testing.assert_allclose(metrics.compute_energy(), expected_energy)
-        self.assertAlmostEqual(metrics.compute_delay(), expected_delay_gain)
+        self.assertEqual(metrics.compute_delay(), -.125)
         self.assertEqual(env.pop_member_rewards(), {})
         env.submit_schedule({dag.task_keys[1]: PlacementDecision(owner)})
         end = env.end_step()
         self.assertEqual(set(end.member_rewards), {dag.task_keys[1]})
         final_metrics = end.member_rewards[dag.task_keys[1]]
-        self.assertAlmostEqual(final_metrics.compute_delay(), expected_delay_gain)
+        self.assertEqual(final_metrics.compute_delay(), -.125)
         expected_final = after_flight + hover_power * .5
         expected_final[[0, 1]] += compute
         np.testing.assert_allclose(final_metrics.compute_energy_queue(), expected_final)
@@ -78,7 +77,6 @@ class TestEndStep(unittest.TestCase):
         owner = EntityRef(EntityKind.MEMBER_UAV, 0)
         ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
         cycles = env.members.config.member_core_frequency * .25
-        expected_delay_gain = cycles / env.users.config.core_frequency - .25
         dag = request(owner, ground, inputs=(0., 0.), cycles=(cycles, cycles))
         actions = np.zeros((env.members.member_uav_count, 2))
         with patch.object(env, "_generate_dag_requests", return_value=(dag,)):
@@ -86,18 +84,18 @@ class TestEndStep(unittest.TestCase):
         self.assertEqual(env.pop_member_rewards(), {})
         env.submit_schedule({dag.task_keys[0]: PlacementDecision(owner)})
         first = env.pop_member_rewards()
-        self.assertAlmostEqual(first[dag.task_keys[0]].compute_delay(), expected_delay_gain)
+        self.assertEqual(first[dag.task_keys[0]].compute_delay(), -.125)
         self.assertEqual(env.pop_member_rewards(), {})
         env.submit_schedule({dag.task_keys[1]: PlacementDecision(owner)})
         result = env.end_step()
-        self.assertAlmostEqual(result.member_rewards[dag.task_keys[1]].compute_delay(), expected_delay_gain)
+        self.assertEqual(result.member_rewards[dag.task_keys[1]].compute_delay(), -.125)
         self.assertEqual(result.master_reward, -.25)
         with patch.object(env, "_generate_dag_requests", return_value=(dag,)):
             env.begin_step(actions)
         self.assertEqual(env.pop_member_rewards(), {})
         self.assertEqual(env.end_step().member_rewards, {})
-        self.assertAlmostEqual(first[dag.task_keys[0]].compute_delay(), expected_delay_gain)
-        self.assertAlmostEqual(result.member_rewards[dag.task_keys[1]].compute_delay(), expected_delay_gain)
+        self.assertEqual(first[dag.task_keys[0]].compute_delay(), -.125)
+        self.assertEqual(result.member_rewards[dag.task_keys[1]].compute_delay(), -.125)
 
     def make_environment(self, *, duration=2., budget=145.):
         settings = test_mrdts_env.TestMRDTSEnv.settings()

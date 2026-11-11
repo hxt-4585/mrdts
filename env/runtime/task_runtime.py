@@ -50,7 +50,6 @@ class TaskRuntime:
     unfinished_dags_at_decision: int | None = None
     unfinished_region_dags_at_decision: int | None = None  # 决策时 owner 所在区域的未完成 DAG 总数。
     managed_dag_count: int | None = None
-    local_mean_delay_at_decision_s: float | None = None  # 当前任务及剩余任务全本地的 owner 均值。
 
     def mark_input_arrived(self, at: float) -> bool:
         self.input_arrival_at = float(at)

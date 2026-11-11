@@ -113,7 +113,7 @@ class TestJointDelayPPOLower(unittest.TestCase):
         self.assertEqual(row['failed_dags'], 0)
         self.assertEqual(row['member_decisions'], 12)
         self.assertAlmostEqual(delays.sum(), row['delay_sum_s'])
-        self.assertTrue(np.isfinite(row['member_reward_sum']))
+        self.assertLess(row['member_reward_sum'], 0.)
         for owner, samples in trajectory.items():
             for sample in samples:
                 raw = raw_observations[sample.key]

@@ -45,18 +45,21 @@ class MasterReward:
 class MemberReward:
     """单个子任务的完成指标；由运行时完成入账后创建。"""
 
-    def __init__(self, task: TaskRuntime, delay_improvement_s: float):
-        self._delay_reward = float(delay_improvement_s)
+    def __init__(self, task: TaskRuntime, slot_dag_count: int, scheduling_duration_s: float):
+        elapsed = task.compute_finish_at - task.decision_at
+        self._delay_reward = -task.unfinished_region_dags_at_decision * elapsed / (
+            slot_dag_count * scheduling_duration_s
+        )
         self._energy_j = task.member_energy_j
         self._energy_queue_j = task.energy_virtual_queue_j
 
     def compute_delay(self) -> float:
-        """返回 owner 平均 DAG 时延改善估计，单位为秒，正值表示改善。
+        """返回完成任务的时延奖励 -U_region * Δt / (N * H)。
 
-        决策前预测当前任务及剩余任务全本地执行的平均时延；当前任务实际
-        完成后保留真实结果，预测剩余任务全本地的平均时延，返回前者减后者。
-        两边保留此前已完成 DAG，使用固定 DAG key / 拓扑参考顺序与参考
-        回传时延。本地动作收益为零；归一化和 Lyapunov 组合由方法侧决定。
+        U_region 为决策时 owner 所在区域尚未完成的 DAG 总数，含同区域
+        其他 Member 管理的 DAG；与实际执行节点的位置无关。N 为本窗口全系统
+        登记的 DAG 总数（含无 owner 的 DAG），H 为固定名义调度时隙长度。
+        Δt 从提交动作到实际计算完成，包含传输、数据等待、排队和计算。
         """
         return self._delay_reward
 
