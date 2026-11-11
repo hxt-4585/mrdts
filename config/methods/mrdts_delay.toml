@@ -1,6 +1,6 @@
 # Independent regional delay prediction and member PPO.
 [train]
-episodes = 125
+episodes = 300
 slots = 500
 workers = 2
 rollout_slots = 8

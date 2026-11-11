@@ -10,10 +10,10 @@ center_bias = 0.85
 # 中心分布的扩散范围，相对于区域等效半径；值越大，分布越平缓。
 center_spread_ratio = 0.25
 # 每台地面用户的总发射功率预算（W），其活动发送信道均分。
-transmit_power = 0.2
+transmit_power = 0.3
 
 [computation]
 # 每台地面设备的计算核心数。
-core_count = 2
+core_count = 4
 # 每个地面设备计算核心的频率（CPU cycles/s）。
-core_frequency = 1000000000.0
+core_frequency = 1200000000.0
