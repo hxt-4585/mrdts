@@ -14,6 +14,7 @@ import traceback
 
 import torch
 
+from scripts.member_checkpoint import load_member_weights
 from methods.mrdts_delay.high import DelayPlanner
 from methods.mrdts_delay.low import PPO
 from methods.mrdts_delay.runtime import build_environment, default_settings, run_slot
@@ -35,7 +36,7 @@ def _worker(pipe, snapshot, config, index, rng):
             job = pipe.recv()
             if job is None:
                 return
-            low.policies.load_state_dict(job['low'])
+            load_member_weights(low.policies, job['low'], env.members.member_uav_count, dag_share=True)
             planner.load_policy(job['high'])
             if active_epoch != job['epoch'] or job['evaluation']:
                 active_epoch = job['epoch']

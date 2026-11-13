@@ -153,8 +153,9 @@ class TestMRDTSEnv(unittest.TestCase):
         features[4] = [config.input_data_range[1] * 0.25, config.cpu_range[1] * 0.5]
         features[5] = [config.input_data_range[1] * 0.8, config.cpu_range[1] * 0.2]
         edges = [(parent, 4) for parent in range(4)]
+        edge_max = config.intermediate_data_range[1]
         request = DAGRequest(
-            0, DAG(6, edges, features, dict.fromkeys(edges, 0.0)),
+            0, DAG(6, edges, features, dict(zip(edges, edge_max * np.array([.25, .75, .5, 1.])))),
             EntityRef(EntityKind.MEMBER_UAV, 2), EntityRef(EntityKind.GROUND_DEVICE, 0),
         )
         keys = runtime.register_dags([request])
@@ -186,9 +187,9 @@ class TestMRDTSEnv(unittest.TestCase):
         observation = environment.observe_member(keys[4])
 
         self.assertIsInstance(observation, np.ndarray)
-        self.assertEqual(observation.shape, (6 * count + 9,))
+        self.assertEqual(observation.shape, (5 * count + 6,))
         predecessors = np.zeros(count + 2)
-        predecessors[[1, count - 1, count]] = 1
+        predecessors[[1, count - 1, count]] = np.array([1., .5, 1.]) / (environment.settings["dag"].n - 1)
         identity = np.zeros(count)
         identity[2] = 1
         positions = np.zeros((count, 2))
@@ -197,8 +198,8 @@ class TestMRDTSEnv(unittest.TestCase):
         queues = np.zeros(count)
         queues[[0, 2]] = [0.5, 2.0]
         expected = np.concatenate(
-            ([0.5, 0.25], predecessors, identity, positions.ravel(), queues, np.zeros(count + 2),
-             environment.users.positions[0, :2].astype(float) / side_length, [1.0])
+            ([0.5, 0.25], predecessors, identity, positions.ravel(), queues,
+             environment.users.positions[0, :2].astype(float) / side_length)
         )
         np.testing.assert_allclose(observation, expected)
         self.assertEqual(environment._runtime.now, 0.0)
@@ -215,7 +216,7 @@ class TestMRDTSEnv(unittest.TestCase):
         refreshed = environment.observe_member(keys[4])
         positions[0] = 0.0
         positions[2] = [0.5, 0.75]
-        queues[[0, 2]] = [0.0, 1.0]
+        queues[[0, 2]] = [0.0, 2.0]
         np.testing.assert_allclose(refreshed[4 + 2 * count:4 + 4 * count], positions.ravel())
         np.testing.assert_allclose(refreshed[4 + 4 * count:4 + 5 * count], queues)
         np.testing.assert_array_equal(observation, expected)
@@ -231,8 +232,10 @@ class TestMRDTSEnv(unittest.TestCase):
         runtime = environment._runtime
         ground = EntityRef(EntityKind.GROUND_DEVICE, 7)
         edges = [(parent, 4) for parent in range(4)]
+        config = environment.settings["dag"]
+        edge_max = config.intermediate_data_range[1]
         request = DAGRequest(
-            0, DAG(5, edges, np.zeros((5, 2)), dict.fromkeys(edges, 0.0)),
+            0, DAG(5, edges, np.zeros((5, 2)), dict(zip(edges, edge_max * np.array([.25, .75, .5, 0.])))),
             EntityRef(EntityKind.MEMBER_UAV, 2), ground,
         )
         keys = runtime.register_dags([request])
@@ -242,26 +245,9 @@ class TestMRDTSEnv(unittest.TestCase):
 
         observation = environment.observe_member(keys[4])
         expected = np.zeros(count + 2)
-        expected[[2, count, count + 1]] = 1.
-        np.testing.assert_array_equal(observation[2:count + 4], expected)
-        np.testing.assert_allclose(observation[-3:-1], [.2, .8])
-        self.assertEqual(observation[-4], 0.)
-
-        # 独立服务器快照验证本地等待项读取的是任务所属用户，而非用户 0。
-        local = runtime.servers[ground]
-        local.core_frequencies = (10.,)
-        local.enqueue(keys[4], 5., runtime.now)
-        local.dispatch(runtime.now)
-        local.enqueue(keys[4], 10., runtime.now)
-        other = runtime.servers[EntityRef(EntityKind.GROUND_DEVICE, 0)]
-        other.core_frequencies = (1.,)
-        other.enqueue(TaskKey(0, 0, 1, 0), 100., runtime.now)
-        other.dispatch(runtime.now)
-        refreshed = environment.observe_member(keys[4])
-        duration = runtime.deadline - runtime.slot_start
-        self.assertAlmostEqual(refreshed[-4], 1.5 / duration)
-        self.assertEqual(observation[-4], 0.)
-        self.assertEqual(runtime.now, 0.)
+        expected[[2, count + 1]] = np.array([.5, 1.]) / (config.n - 1)
+        np.testing.assert_allclose(observation[2:count + 4], expected)
+        np.testing.assert_allclose(observation[-2:], [.2, .8])
 
     def test_member_observer_uses_current_runtime_and_returns_independent_arrays(self):
         environment = MRDTSEnv(self.settings())
@@ -279,18 +265,53 @@ class TestMRDTSEnv(unittest.TestCase):
         environment._runtime.tasks[keys[4]].cpu_cycles *= 0.5
         after_reset = environment.observe_member(keys[4])
         self.assertEqual(after_reset[0], 0.25)
-        np.testing.assert_array_equal(after_reset[4 + 4 * environment.members.member_uav_count:-3], 0.0)
+        np.testing.assert_array_equal(after_reset[4 + 4 * environment.members.member_uav_count:-2], 0.0)
 
         environment.generate_scene()
-        keys = self.register_member_tasks(environment)
         environment.members.energy_virtual_queue_j[:environment.members.member_uav_count] = (
             environment.members.config.member_slot_energy
         )
+        keys = self.register_member_tasks(environment)
         after_generate = environment.observe_member(keys[4])
         self.assertEqual(after_generate[0], 0.5)
         self.assertEqual(after_generate[4 + 4 * environment.members.member_uav_count + 2], 1.0)
 
-    def test_member_compute_wait_includes_bs_and_uses_relative_fixed_window_time(self):
+    def test_member_predecessor_data_reaches_one_at_fixed_aggregate_bound(self):
+        settings = self.settings()
+        settings["dag"] = replace(settings["dag"], n=4)
+        environment = MRDTSEnv(settings)
+        environment.generate_scene()
+        environment.user_member_ids = np.zeros(environment.users.num_users, dtype=int)
+        environment._create_scheduling_runtime()
+        config = settings["dag"]
+        features = np.zeros((config.n, 2))
+        features[-1] = [config.input_data_range[1], config.cpu_range[1]]
+        edges = [(parent, config.n - 1) for parent in range(config.n - 1)]
+        owner = EntityRef(EntityKind.MEMBER_UAV, 0)
+        request = DAGRequest(
+            0, DAG(config.n, edges, features, dict.fromkeys(edges, config.intermediate_data_range[1])),
+            owner, EntityRef(EntityKind.GROUND_DEVICE, 0),
+        )
+        keys = environment._runtime.register_dags([request])
+        for key in keys[:-1]:
+            environment.submit_schedule({key: PlacementDecision(owner)})
+        observation = environment.observe_member(keys[-1])
+        np.testing.assert_allclose(observation[:3], 1.)
+        np.testing.assert_array_equal(observation[3:environment.members.member_uav_count + 4], 0.)
+
+    def test_single_node_dag_has_zero_predecessor_data(self):
+        settings = self.settings()
+        settings["dag"] = replace(settings["dag"], n=1)
+        environment = MRDTSEnv(settings)
+        environment.generate_scene()
+        environment.reset(epoch_index=0)
+        begin = environment.begin_step(np.zeros((environment.members.member_uav_count, 2)))
+        key = next(request.task_keys[0] for request in begin.requests if request.owner_member is not None)
+        observation = environment.observe_member(key)
+        self.assertTrue(np.isfinite(observation).all())
+        np.testing.assert_array_equal(observation[2:environment.members.member_uav_count + 4], 0.)
+
+    def test_member_observation_is_independent_of_compute_wait(self):
         settings = self.settings()
         settings["env"] = replace(settings["env"], scheduling_duration_s=2.)
         environment = MRDTSEnv(settings)
@@ -303,7 +324,7 @@ class TestMRDTSEnv(unittest.TestCase):
         member = runtime.servers[EntityRef(EntityKind.MEMBER_UAV, 0)]
         hidden = runtime.servers[EntityRef(EntityKind.MEMBER_UAV, 1)]
         bs = runtime.servers[runtime.global_bs]
-        # 构建同一观测时刻的服务器快照；BS 使用独立的计算频率。
+        before = environment.observe_member(keys[4])
         for server, frequency, running_cycles, queued_cycles in (
             (member, 10., 6., 4.), (hidden, 10., 50., 10.), (bs, 20., 16., 44.),
         ):
@@ -313,19 +334,9 @@ class TestMRDTSEnv(unittest.TestCase):
             server.enqueue(TaskKey(0, 0, 1, 1), queued_cycles, 10.)
         runtime.now = 10.2
 
-        first = environment.observe_member(keys[4])
-        expected = np.zeros(count + 2)
-        expected[0] = .8 / 2.
-        expected[count] = 2.8 / 2.  # 允许超过 1，不截断截止窗口后的负载。
-        np.testing.assert_allclose(first[5 * count + 4:-3], expected)
-        self.assertEqual(runtime.now, 10.2)
-
-        runtime.now = 10.5
-        later = environment.observe_member(keys[4])
-        expected[0] = .5 / 2.
-        expected[count] = 2.5 / 2.
-        np.testing.assert_allclose(later[5 * count + 4:-3], expected)
-        self.assertAlmostEqual(first[-5], 1.4)
+        self.assertGreater(member.compute_wait(runtime.now), 0.)
+        self.assertGreater(bs.compute_wait(runtime.now), 0.)
+        np.testing.assert_array_equal(environment.observe_member(keys[4]), before)
 
     def test_begin_step_moves_members_and_registers_tasks_against_updated_topology(self):
         environment = MRDTSEnv(self.settings())
@@ -387,7 +398,6 @@ class TestMRDTSEnv(unittest.TestCase):
             ))]
             self.assertEqual(request.owner_member.index, nearest)
             self.assertEqual(request.ground_device.index, user_id)
-            self.assertEqual(runtime.ground_owner_members[request.ground_device], request.owner_member)
             np.testing.assert_array_equal(runtime.entity_positions[request.owner_member], members.positions[nearest])
             for key in request.task_keys:
                 self.assertEqual(runtime.tasks[key].cpu_cycles, request.dag.node_features[key.node_id, 1])
@@ -398,8 +408,8 @@ class TestMRDTSEnv(unittest.TestCase):
         self.assertTrue(all(not server.queue and not server.running for server in runtime.servers.values()))
         key = next(key for key, task in runtime.tasks.items() if not task.predecessors)
         observation = environment.observe_member(key)
-        self.assertEqual(observation.shape, (6 * count + 9,))
-        np.testing.assert_array_equal(observation[5 * count + 4:-3], 0.)
+        self.assertEqual(observation.shape, (5 * count + 6,))
+        np.testing.assert_array_equal(observation[2:count + 4], 0.)
         self.assertEqual(runtime.now, 0.)
 
     def test_begin_step_uses_configured_resources_and_current_window_without_advancing_step(self):

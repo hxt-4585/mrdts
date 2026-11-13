@@ -25,21 +25,20 @@ class TestEnergyAccounting(unittest.TestCase):
         )
         return runtime, members, grounds, bs
 
-    def test_compute_charged_on_completion_to_executor_before_next_decision(self):
+    def test_compute_charged_on_completion_to_executor(self):
         runtime, members, grounds, _ = self.make_runtime()
         dag = request(members[0], grounds[0], inputs=(0., 0.), cycles=(20., 10.))
         parent, child = runtime.register_dags([dag])
-        runtime.submit_placements({parent: PlacementDecision(members[1])})
+        runtime.submit_placements({parent: PlacementDecision(members[1]),
+                                   child: PlacementDecision(grounds[0])})
         self.assertEqual(runtime.trace(parent).compute_energy_j, 0.)
         np.testing.assert_array_equal(self.queue, 0.)
         runtime.advance_until(1.)
         np.testing.assert_array_equal(self.queue, 2.)
-        self.assertEqual(runtime.advance_to_decision(), (0,))
+        runtime.advance_until(2.)
         np.testing.assert_array_equal(self.queue, [4., 24., 4., 4.])
         self.assertEqual(self.events, [(2., 1, 20.)])
         self.assertEqual(runtime.trace(parent).compute_energy_j, 20.)
-        runtime.submit_placements({child: PlacementDecision(grounds[0])})
-        runtime.advance_to_decision()
         result = runtime.finish_slot()
         self.assertEqual(result.compute_energy_j, 20.)
         np.testing.assert_array_equal(self.queue, [20., 40., 20., 20.])
@@ -53,9 +52,9 @@ class TestEnergyAccounting(unittest.TestCase):
         dag = request(members[0], grounds[0], inputs=(0., 0.), cycles=(10., 10.),
                       edges=((0, 1),), sizes=(2.,))
         parent, child = runtime.register_dags([dag])
-        runtime.submit_placements({parent: PlacementDecision(members[1])})
-        runtime.advance_to_decision()
-        runtime.submit_placements({child: PlacementDecision(grounds[0])})
+        runtime.submit_placements({parent: PlacementDecision(members[1]),
+                                   child: PlacementDecision(grounds[0])})
+        runtime.advance_until(1.)
         record = runtime.trace(child).predecessor_records[parent]
         runtime.advance_until(2.)
         self.assertEqual(record.tx_energy_j, 1.)
@@ -67,19 +66,22 @@ class TestEnergyAccounting(unittest.TestCase):
         self.assertEqual(record.tx_energy_j, 4.)
         self.assertEqual(self.events[-1][:2], (5., 0))
         self.assertAlmostEqual(self.events[-1][2], 2.)
-        runtime.advance_to_decision()
+        result = runtime.finish_slot()
+        self.assertEqual(result.compute_energy_j, 10.)
+        self.assertEqual(result.tx_energy_j, 4.)
+
+    def test_bs_compute_and_transmit_energy_excluded_from_member_totals(self):
+        runtime, members, grounds, bs = self.make_runtime()
         other = request(members[0], grounds[0], dag_id=1, inputs=(2., 0.), cycles=(10., 10.),
                         edges=((0, 1),), sizes=(1.,))
         key = runtime.register_dags([other])[0]
-        runtime.submit_placements({key: PlacementDecision(bs)})
-        runtime.advance_to_decision()
-        runtime.submit_placements({other.task_keys[1]: PlacementDecision(grounds[0])})
-        runtime.advance_to_decision()
+        runtime.submit_placements({key: PlacementDecision(bs),
+                                   other.task_keys[1]: PlacementDecision(grounds[0])})
         result = runtime.finish_slot()
-        self.assertEqual(result.compute_energy_j, 10.)
+        self.assertEqual(result.compute_energy_j, 0.)
         self.assertEqual(runtime.trace(key).compute_energy_j, 0.)
         self.assertAlmostEqual(runtime.trace(key).input_record.tx_energy_j, 2.)
-        self.assertAlmostEqual(result.tx_energy_j, 7.)  # BS 下发第一跳不计，Member 转发计 1J。
+        self.assertAlmostEqual(result.tx_energy_j, 3.)  # BS 下发第一跳不计，Member 转发计 1J。
 
     def test_full_computation_includes_work_queued_past_nominal_boundary(self):
         runtime, members, grounds, bs = self.make_runtime(duration=2.)
@@ -92,7 +94,6 @@ class TestEnergyAccounting(unittest.TestCase):
         runtime.register_dags(dags)
         runtime.submit_placements({dag.task_keys[0]: PlacementDecision(target)
                                    for dag, target in zip(dags, (bs, members[1], members[1], members[3]))})
-        runtime.advance_to_decision()
         result = runtime.finish_slot()
         # 用户上传 1s 不计能耗；Member 0 转发恰好在截止完成，记 1J。
         self.assertAlmostEqual(result.tx_energy_j, 1.)
@@ -108,7 +109,6 @@ class TestEnergyAccounting(unittest.TestCase):
         dag = request(members[0], grounds[0], inputs=(2.,), cycles=(10.,))
         key = runtime.register_dags([dag])[0]
         runtime.submit_placements({key: PlacementDecision(bs)})
-        runtime.advance_to_decision()
         result = runtime.finish_slot()
         self.assertAlmostEqual(result.tx_energy_j, 2.)
         self.assertEqual(result.compute_energy_j, 0.)

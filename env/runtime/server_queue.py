@@ -1,8 +1,8 @@
-"""服务器级 FIFO 多核计算调度状态。"""
+"""按全部输入就绪时间派发计算，同刻按子任务的提交顺序派发。"""
 
-from collections import deque
 from dataclasses import dataclass, field
 import heapq
+from itertools import count
 
 from env.types import EntityKind, EntityRef, TaskKey
 
@@ -16,11 +16,13 @@ class ComputeRecord:
     energy_j: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class _QueuedCompute:
-    task_key: TaskKey
-    cpu_cycles: float
     ready_at: float
+    schedule_index: int
+    sequence: int
+    task_key: TaskKey = field(compare=False)
+    cpu_cycles: float = field(compare=False)
 
 
 @dataclass
@@ -28,18 +30,16 @@ class ServerState:
     node: EntityRef
     core_frequencies: tuple[float, ...]
     capacitance_factor: float
-    queue: deque[_QueuedCompute] = field(default_factory=deque)
+    queue: list[_QueuedCompute] = field(default_factory=list)
+    _sequence: count = field(default_factory=count, init=False)
     running: dict[int, ComputeRecord] = field(default_factory=dict)
 
-    @property
-    def queued_task_keys(self) -> tuple[TaskKey, ...]:
-        return tuple(item.task_key for item in self.queue)
-
-    def enqueue(self, task_key: TaskKey, cpu_cycles: float, ready_at: float) -> None:
-        self.queue.append(_QueuedCompute(task_key, float(cpu_cycles), float(ready_at)))
+    def enqueue(self, task_key: TaskKey, cpu_cycles: float, ready_at: float, schedule_index: int = 0) -> None:
+        item = _QueuedCompute(float(ready_at), schedule_index, next(self._sequence), task_key, float(cpu_cycles))
+        heapq.heappush(self.queue, item)
 
     def compute_wait(self, now: float) -> float:
-        """返回此刻就绪的新任务需要等待的秒数，不修改队列或核心状态。
+        """估计排在当前全部就绪任务之后的任务需要等待的秒数，不修改队列或核心状态。
 
         调用方已处理 now 时刻的事件；只推算运行中及公共就绪队列的负载，
         不计等待数据的任务和未来到达。核心同时空闲时沿用编号顺序。
@@ -55,7 +55,7 @@ class ServerState:
         ]
         heapq.heapify(available)
         idle = []
-        for item in self.queue:
+        for item in sorted(self.queue):
             if not idle:
                 start_at = available[0][0]
                 while available and available[0][0] == start_at:
@@ -67,23 +67,26 @@ class ServerState:
             heapq.heappush(available, (finish_at, core_id))
         return (start_at if idle else available[0][0]) - now
 
+    def idle_cores(self) -> list[int]:
+        return [core_id for core_id in range(len(self.core_frequencies)) if core_id not in self.running]
+
+    def start_next(self, core_id: int, now: float) -> ComputeRecord:
+        item = heapq.heappop(self.queue)
+        frequency = self.core_frequencies[core_id]
+        finish_at = now + item.cpu_cycles / frequency
+        energy_j = (self.capacitance_factor * item.cpu_cycles * frequency**2
+                    if self.node.kind is EntityKind.MEMBER_UAV else 0.0)
+        record = ComputeRecord(item.task_key, core_id, now, finish_at, energy_j)
+        self.running[core_id] = record
+        return record
+
     def dispatch(self, now: float) -> tuple[ComputeRecord, ...]:
-        idle = [core_id for core_id in range(len(self.core_frequencies)) if core_id not in self.running]
         started: list[ComputeRecord] = []
-        while idle and self.queue:
-            item = self.queue[0]
-            if item.ready_at > now:
+        for core_id in self.idle_cores():
+            if not self.queue or self.queue[0].ready_at > now:
                 break
-            self.queue.popleft()
-            core_id = idle.pop(0)
-            frequency = self.core_frequencies[core_id]
-            finish_at = now + item.cpu_cycles / frequency
-            energy_j = (self.capacitance_factor * item.cpu_cycles * frequency**2
-                        if self.node.kind is EntityKind.MEMBER_UAV else 0.0)
-            record = ComputeRecord(item.task_key, core_id, now, finish_at, energy_j)
-            self.running[core_id] = record
-            started.append(record)
+            started.append(self.start_next(core_id, now))
         return tuple(started)
 
-    def finish(self, core_id: int, at: float) -> ComputeRecord:
+    def finish(self, core_id: int) -> ComputeRecord:
         return self.running.pop(core_id)

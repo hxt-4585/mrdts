@@ -99,8 +99,8 @@ class TestChannelModel(unittest.TestCase):
             self.config.reference_channel_gain / 100.0**2,
         )
 
-    def test_calculates_transmission_delay_and_transmit_energy(self):
-        """传输时延与发送能耗应由同一链路速率推导。"""
+    def test_calculates_transmission_delay(self):
+        """传输时延应由链路速率推导。"""
         transmitter = np.array([0.0, 0.0, 0.0])
         receiver = np.array([100.0, 0.0, 50.0])
         transmit_power_w = 2.0
@@ -112,12 +112,8 @@ class TestChannelModel(unittest.TestCase):
         delay = self.model.transmission_delay_s(
             data_size_bits, transmitter, receiver, transmit_power_w, LinkType.GROUND_TO_AIR
         )
-        energy = self.model.transmission_energy_j(
-            data_size_bits, transmitter, receiver, transmit_power_w, LinkType.GROUND_TO_AIR
-        )
 
         self.assertAlmostEqual(delay, data_size_bits / metrics.rate_bps)
-        self.assertAlmostEqual(energy, transmit_power_w * delay)
 
     def test_allocated_bandwidth_is_used_for_rate(self):
         """运行时传入本次传输实际分配到的带宽。"""

@@ -12,7 +12,6 @@ from env.entities.uav import MasterUAV, MemberUAV
 from env.entities.user import User
 from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 from env.step.observation import MasterObservation, MemberObservation
-from env.step.reward import MemberReward
 from env.types import EntityKind, EntityRef, TaskKey
 from env.workload.dag_generator import DAGGenerator
 
@@ -58,7 +57,7 @@ class MRDTSEnv:
         masters = MasterUAV(self.settings["uav"])
         masters.generate_from_region(region)
         members = MemberUAV(self.settings["uav"], self.env_config)
-        members.generate_from_region_and_user(region, users, masters)
+        members.generate_from_region_and_user(region, masters)
 
         self.region = region
         self.users = users
@@ -101,16 +100,18 @@ class MRDTSEnv:
         """返回指定 Master 的 (3M,) 观测，供高层决策使用。"""
         return self._master_observation.build(master_id)
 
-    def observe_member(self, task_key: TaskKey) -> np.ndarray:
-        """返回待调度子任务及其 owner Member 的 (6M+9,) 观测，最后三项为用户坐标和 owner 未完成 DAG 占比。"""
-        return self._member_observation.build(task_key, self._runtime)
+    def observe_member(
+        self, task_key: TaskKey, placements: Mapping[TaskKey, PlacementDecision],
+    ) -> np.ndarray:
+        """结合窗口快照和 method 已选的前驱位置生成规划观测。"""
+        return self._member_observation.build(task_key, self._runtime, placements)
 
     def begin_step(self, flight_actions: np.ndarray) -> BeginStepResult:
-        """应用 (M, 2) 飞行动作，准备本窗口首次 Member 决策。
+        """应用 (M, 2) 飞行动作，登记本窗口用于规划的全部 DAG。
 
         每行动作为 [a_x, a_y]，两个分量各自位于 [-1, 1]。
         调用方先 reset，后续窗口须先结算上一窗口。每个用户生成一个 DAG；
-        无 Member 区域的 DAG 自动本地执行，其余任务排序与卸载由 method 决定。
+        无 Member 区域的 DAG 自动本地执行，其余任务由 method 规划位置。
         飞行结束即记入推进能耗和能量虚拟队列；不推进调度时钟或 step_index。
         """
         previous_positions = self.members.positions[:self.members.member_uav_count, :2].astype(float)
@@ -126,39 +127,20 @@ class MRDTSEnv:
         self._create_scheduling_runtime()
         requests = self._generate_dag_requests()
         self._runtime.register_dags(requests)
-        return BeginStepResult(requests, self._runtime.ready_member_ids, self.flight_violations)
+        return BeginStepResult(requests, self.flight_violations)
 
     def submit_schedule(
         self,
-        placements: Mapping[TaskKey, PlacementDecision],
-    ) -> tuple[int, ...]:
-        """提交本批卸载动作，推进到下一决策点并返回可决策 Member 编号。
-
-        调用方先完成当前全部可决策 Member 的观测和动作选择，每个 Member
-        提交一个前驱已完成的任务；目标为所属用户、同区域 Member 或 BS。
-        DAG 已由 begin_step 登记。本方法处理完同一时刻的事件后返回，
-        空元组表示本窗口不再有决策机会，随后由 end_step 完成环境结算。
-        运行时的完成事件和时间推进会更新能量队列；不改变步数和下一窗口起点。
-        """
+        placements: dict[TaskKey, PlacementDecision],
+    ) -> None:
+        """提交整窗位置。计算和每跳传输均按就绪时间排队，同一时刻就绪时按字典插入顺序派发。"""
         self._runtime.submit_placements(placements)
-        return self._runtime.advance_to_decision()
-
-    def pop_member_rewards(self) -> dict[TaskKey, MemberReward]:
-        """在 begin_step 与 end_step 之间领取已完成任务的三个指标。
-
-        通常在 submit_schedule 后调用；按 TaskKey 对应各 owner 的原动作，
-        不保证属于刚提交的批次。尚在执行的任务不返回奖励，重复领取为空。
-        end_step 会在结果中返回剩余未领取奖励。
-        能耗按 Member ID 区分；队列为完成时尚未扣预算的快照。
-        对象中的数组由调用方只读使用。
-        """
-        return self._runtime.pop_member_rewards()
 
     def end_step(self) -> EndStepResult:
         """每步调用一次：完成执行并结算后扣除一次预算，返回快照并推进步数。
 
         已完成作业和飞行能耗已入账，finish_slot 执行剩余已提交作业并补计悬停。
-        调度时钟不含飞行阶段；返回尚未领取的 Member 完成奖励。
+        调度时钟不含飞行阶段；返回全部关联子任务的完成奖励。
         """
         slot_result = self._runtime.finish_slot()
         member_rewards = self._runtime.pop_member_rewards()
@@ -217,6 +199,7 @@ class MRDTSEnv:
 
     def _create_scheduling_runtime(self):
         """按飞行后的拓扑创建本步调度运行时。"""
+        self._member_observation.capture_initial_energy_queues()
         members = self.members
         member_nodes = tuple(
             EntityRef(EntityKind.MEMBER_UAV, member_id)
@@ -235,26 +218,20 @@ class MRDTSEnv:
                 members.config.member_capacitance_factor,
             )
 
-        ground_owner_members = {}
         ground_server = ServerSpec((self.users.config.core_frequency,) * self.users.config.core_count, 0.0)
         for user_id, position in enumerate(self.users.positions):
             ground = EntityRef(EntityKind.GROUND_DEVICE, user_id)
             positions[ground] = position
             powers[ground] = self.users.config.transmit_power
             servers[ground] = ground_server
-            member_id = self.user_member_ids[user_id]
-            if member_id != -1:
-                ground_owner_members[ground] = member_nodes[member_id]
 
         self._runtime = SchedulingRuntime(
             self._channel_model, positions, servers, powers,
             member_regions={node: int(members.region_ids[node.index]) for node in member_nodes},
-            ground_owner_members=ground_owner_members,
             slot_start=self._next_slot_start,
             max_duration_s=self.env_config.scheduling_duration_s,
             on_member_energy=self._record_member_energy,
             on_time_advance=self._record_hover_energy,
-            energy_virtual_queue_j=members.energy_virtual_queue_j,
         )
 
     def _generate_dag_requests(self) -> tuple[DAGRequest, ...]:

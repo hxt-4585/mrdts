@@ -48,14 +48,14 @@ def test_regional_predictions_sum_to_global_mean_even_without_owner():
     assert np.isclose(target.sum(), 8.)
 
 
-def test_member_input_retains_new_share_and_removes_energy():
+def test_member_input_retains_user_position_and_removes_energy():
     count = 3
-    raw = np.arange(6 * count + 9, dtype=np.float64)
+    raw = np.arange(5 * count + 6, dtype=np.float64)
     actual = member_input(raw, count)
     expected = np.concatenate((raw[:4 + 4 * count], raw[4 + 5 * count:]))
     np.testing.assert_array_equal(actual, expected)
-    assert actual.shape == (5 * count + 9,)
-    assert actual[-1] == raw[-1]
+    assert actual.shape == (4 * count + 6,)
+    np.testing.assert_array_equal(actual[-2:], raw[-2:])
 
 
 def test_gae_ends_at_slot_boundary():
@@ -63,6 +63,22 @@ def test_gae_ends_at_slot_boundary():
                Transition(np.zeros(2), np.ones(2, bool), 1, 0., .2, -2.)]
     advantages(samples, gamma=1., trace=1.)
     np.testing.assert_allclose([s.target for s in samples], [-3., -2.])
+
+
+def test_all_local_window_returns_delay_without_member_decisions():
+    env = small_environment()
+    # All members are in region 1 and all users are in region 2.
+    env.members.positions[:-1, :2] = env.masters.positions[0, :2]
+    env.users.positions[:, :2] = env.masters.positions[1, :2]
+    env.users.region_ids.fill(2)
+    actions = np.zeros((env.members.member_uav_count, 2))
+    trajectories, row, targets = run_slot(env, None, actions, load_config()['train'])
+    assert not any(trajectories)
+    assert row['member_decisions'] == 0
+    assert row['member_reward_sum'] == 0
+    assert row['dag_count'] == env.users.num_users
+    assert row['mean_delay_s'] > 0
+    assert np.isclose(targets[1], row['mean_delay_s'])
 
 
 def test_real_slot_training_feedback_and_planning():

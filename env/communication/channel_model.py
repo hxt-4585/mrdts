@@ -87,15 +87,6 @@ class ChannelModel:
         )
         return float(data_size_bits) / metrics.rate_bps
 
-    def transmission_energy_j(
-        self, data_size_bits, transmitter, receiver, transmit_power_w, link_type, bandwidth_hz=None
-    ):
-        """返回发送端传输 data_size_bits 所消耗的能量（J）。"""
-        transmit_power_w = float(transmit_power_w)
-        return transmit_power_w * self.transmission_delay_s(
-            data_size_bits, transmitter, receiver, transmit_power_w, link_type, bandwidth_hz
-        )
-
     def _los_probability(self, elevation_angle_deg):
         return 1.0 / (
             1.0

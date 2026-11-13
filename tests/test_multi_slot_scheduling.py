@@ -12,7 +12,7 @@ from env.env import MRDTSEnv
 from tests import test_mrdts_env
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
-from methods.random.ers import ERS
+from scripts.ers import ERS
 from methods.scheduling import run_online_schedule
 
 

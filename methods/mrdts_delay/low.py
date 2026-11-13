@@ -8,7 +8,7 @@ from torch.distributions import Categorical
 
 
 def member_input(raw, count):
-    # Omit energy queues, keep waiting times, user coordinates and unfinished-DAG share.
+    # Keep user coordinates after removing the energy queues.
     return np.concatenate((raw[:4 + 4 * count], raw[4 + 5 * count:])).astype(np.float32)
 
 
@@ -51,7 +51,7 @@ class PPO:
     def __init__(self, count, config, device=None):
         self.config = config
         self.device = torch.device(device or config['device'])
-        self.policies = nn.ModuleList([MemberPolicy(5 * count + 9, count + 2, config['hidden'])
+        self.policies = nn.ModuleList([MemberPolicy(4 * count + 6, count + 2, config['hidden'])
                                        for _ in range(count)]).to(self.device)
         self.optimizers = [torch.optim.Adam(policy.parameters(), lr=config['learning_rate'])
                            for policy in self.policies]

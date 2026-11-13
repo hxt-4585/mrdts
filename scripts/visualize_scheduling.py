@@ -20,7 +20,7 @@ from env.runtime.channel_queue import TransferStatus
 from env.settings import ChannelConfig, DAGConfig, EnvConfig, RegionConfig, UAVConfig, UserConfig
 from env.types import EntityKind, EntityRef
 from env.workload.dag_generator import DAG
-from methods.random.ers import ERS
+from scripts.ers import ERS
 
 
 def entity_id(entity):
@@ -113,14 +113,9 @@ def build_replay(load_scale=1.0, initial_region=1):
                                     target=f"d{user_index}-t{b}", kbit=dag.edge_features[(a, b)]) for a, b in edges]))
 
     plan = ERS(runtime).plan(requests)
-    orders = {member.index: iter(order) for member, order in plan.member_orders.items()}
-    ready = begin.ready_member_ids
-    while ready:
-        keys = [next(orders[member_id]) for member_id in ready]
-        ready = environment.submit_schedule({key: PlacementDecision(execution_nodes[key]) for key in keys})
+    placements = {key: PlacementDecision(execution_nodes[key]) for key in plan.order}
+    environment.submit_schedule(placements)
     result = environment.end_step().slot_result
-    # 排名仅用于展示 method 的序列，不参与环境的资源排序。
-    ers_indices = {key: index for index, key in enumerate(plan.order)}
     request_by_key = {request.key: request for request in requests}
     tasks, transfers, events = [], [], []
 
@@ -136,7 +131,7 @@ def build_replay(load_scale=1.0, initial_region=1):
         costs = plan.costs[key.owner_member_id, key.user_id, key.dag_id]
         tasks.append(dict(id=tid, label=label, node=key.node_id, dag=f"d{key.dag_id}", region=region_id,
                           execution=execution,
-                          ers=ers_indices[key], decision_at=task.decision_at,
+                          ers=task.schedule_index, decision_at=task.decision_at,
                           rank_s=plan.ranks[key], average_compute_s=costs.average_compute_s[key.node_id],
                           average_edge_comm_s={str(child): value for (parent, child), value
                                                in costs.average_edge_comm_s.items() if parent == key.node_id},
@@ -145,7 +140,7 @@ def build_replay(load_scale=1.0, initial_region=1):
                           input_arrival=task.input_arrival_at, ready=task.data_ready_at,
                           queued=task.compute_queue_enter_at, start=task.compute_start_at,
                           finish=task.compute_finish_at, core=task.execution_core_id,
-                          failed_at=task.failed_at, final_status=task.status.value,
+                          final_status=task.status.value,
                           compute_energy_j=task.compute_energy_j))
         event(task.decision_at, "placement", region_id, f"{label} 确定卸载目标", task=tid)
         event(task.input_arrival_at, "input_arrival", region_id, f"{label} 原始输入到达", task=tid)
@@ -155,7 +150,6 @@ def build_replay(load_scale=1.0, initial_region=1):
         event(task.compute_start_at, "compute_start", region_id,
               f"{label} 开始计算 · {execution} / C{task.execution_core_id}", task=tid)
         event(task.compute_finish_at, "compute_finish", region_id, f"{label} 计算完成", task=tid)
-        event(task.failed_at, "task_failed", region_id, f"{label} 任务失败", task=tid)
         records = [(None, task.input_record), *sorted(task.predecessor_records.items())]
         request = request_by_key[key.owner_member_id, key.user_id, key.dag_id]
         for parent, record in records:
@@ -177,7 +171,7 @@ def build_replay(load_scale=1.0, initial_region=1):
                                       kind="input" if parent is None else "result", label=name,
                                       predecessor=task_id(parent) if parent is not None else None,
                                       hop=hop, hop_count=len(record.transfer_ids), source=source, target=target,
-                                      queue_order=None, ers=ers_indices[key], source_ready=job.source_ready_at,
+                                      queue_order=None, ers=task.schedule_index, source_ready=job.source_ready_at,
                                       duration=(display_end - job.start_at) if display_end is not None else None,
                                       start=job.start_at, finish=finish,
                                       display_end=display_end, completed=completed, energy_j=energy))
@@ -198,7 +192,7 @@ def build_replay(load_scale=1.0, initial_region=1):
 
     for dag, outcome in zip(dag_definitions, sorted(result.dags, key=lambda item: item.key[1])):
         dag.update(completion=outcome.completion_time, failed=outcome.failed)
-        event(0.0, "dag_submit", dag["region"], f"{dag['label']} 登记：各子任务等待在线卸载决策")
+        event(result.slot_start, "dag_submit", dag["region"], f"{dag['label']} 登记并参与整窗规划")
         event(outcome.completion_time, "dag_finish", dag["region"], f"{dag['label']} 全部子任务完成")
     event(result.slot_end, "slot_close", 0, "本轮任务执行完成，结算并释放运行时")
     # 同时刻事件作为一批展示；顺序仅用于可读性，不宣称是内核微观处理顺序。

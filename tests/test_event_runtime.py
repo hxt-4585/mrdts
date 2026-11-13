@@ -6,7 +6,6 @@ import numpy as np
 
 from env.communication.channel_model import ChannelModel
 from env.contracts import DAGRequest, PlacementDecision
-from methods.scheduling import run_online_schedule
 from env.runtime.event_runtime import SchedulingRuntime, ServerSpec
 from env.types import DirectedChannelKey, EntityKind, EntityRef
 from env.workload.dag_generator import DAG
@@ -41,7 +40,6 @@ class TestSchedulingRuntime(unittest.TestCase):
                 self.bs: 1.0,
             },
             member_regions={self.member: 1, self.other_member: 1},
-            ground_owner_members={self.ground: self.member},
         )
         self.dag = DAG(
             node_num=2,
@@ -56,55 +54,43 @@ class TestSchedulingRuntime(unittest.TestCase):
 
     def test_workload_sizes_are_decimal_kbit(self):
         parent, child = self.register()
-        self.runtime.submit_placements({parent: PlacementDecision(self.member)})
+        self.runtime.submit_placements({parent: PlacementDecision(self.member), child: PlacementDecision(self.bs)})
         input_hop = DirectedChannelKey(self.ground, self.member)
         self.assertEqual(self.runtime.trace(parent).input_bits, 1000.)
-        self.assertAlmostEqual(self.runtime.channel_state(input_hop).active.predicted_finish_at - self.runtime.now,
+        self.assertAlmostEqual(self.runtime.channels[input_hop].active.predicted_finish_at - self.runtime.now,
                                self.runtime.transfer_duration_s(input_hop, 1000.))
-        self.runtime.advance_to_decision()
-        self.runtime.submit_placements({child: PlacementDecision(self.bs)})
-        edge_hop = DirectedChannelKey(self.member, self.bs)
+        self.runtime.finish_slot()
         transfer_id = self.runtime.trace(child).predecessor_records[parent].transfer_ids[0]
         self.assertEqual(self.runtime.transfer_jobs[transfer_id].payload_bits, 1000.)
-        # 两条活动信道均分配置中的全网总带宽。
-        expected_bandwidth_hz = self.runtime.channel_model.config.total_bandwidth_mhz * 1e6 / 2
-        self.assertEqual(self.runtime.transfer_jobs[transfer_id].bandwidth_hz, expected_bandwidth_hz)
+        self.assertGreaterEqual(self.runtime.transfer_jobs[transfer_id].start_at,
+                                self.runtime.trace(parent).compute_finish_at)
 
     def test_relayed_inputs_and_local_predecessor_enable_computation(self):
         keys = self.register()
-        run_online_schedule(self.runtime, {self.member: keys}, lambda key: PlacementDecision(self.bs))
+        self.runtime.submit_placements(dict.fromkeys(keys, PlacementDecision(self.bs)))
+        self.runtime.finish_slot()
         parent, child = (self.runtime.trace(key) for key in keys)
         self.assertEqual(len(parent.input_record.transfer_ids), 2)
-        self.assertEqual(child.predecessor_arrival_at[parent.key], child.decision_at)
-        self.assertEqual(child.decision_at, parent.compute_finish_at)
+        self.assertEqual(child.predecessor_arrival_at[parent.key], parent.compute_finish_at)
+        self.assertEqual(child.decision_at, parent.decision_at)
         for task in (parent, child):
             self.assertGreaterEqual(task.compute_start_at, task.data_ready_at)
             self.assertEqual(task.status.value, 'finished')
 
     def test_active_transfer_remains_active_before_its_finish_time(self):
         keys = self.register()
-        self.runtime.submit_placements({keys[0]: PlacementDecision(self.member)})
-        channel = self.runtime.channel_state(DirectedChannelKey(self.ground, self.member))
+        self.runtime.submit_placements(dict.fromkeys(keys, PlacementDecision(self.member)))
+        channel = self.runtime.channels[DirectedChannelKey(self.ground, self.member)]
         active = channel.active
         self.runtime.advance_until(active.predicted_finish_at / 2.)
         self.assertIs(channel.active, active)
-        self.assertIsNone(self.runtime.trace(keys[1]).input_record)
-
-    def test_each_decision_uses_post_flight_topology_snapshot(self):
-        position = np.array([80., 0., 10.])
-        self.runtime.update_entity_positions({self.member: position})
-        keys = self.register()
-        run_online_schedule(self.runtime, {self.member: keys}, lambda key: PlacementDecision(self.member))
-        hop = DirectedChannelKey(self.ground, self.member)
-        expected = self.runtime.transfer_duration_s(hop, 1000.)
-        for key in keys:
-            record = self.runtime.trace(key).input_record
-            self.assertAlmostEqual(record.finish_at - record.start_at, expected)
+        self.assertIsNone(self.runtime.trace(keys[1]).input_record.start_at)
 
     def test_all_local_dag_finishes_without_transfers_or_compute_energy(self):
         keys = self.register()
-        run_online_schedule(self.runtime, {self.member: keys}, lambda key: PlacementDecision(self.ground))
-        self.assertFalse(self.runtime.channels)
+        self.runtime.submit_placements(dict.fromkeys(keys, PlacementDecision(self.ground)))
+        self.runtime.finish_slot()
+        self.assertFalse(self.runtime.transfer_jobs)
         for key in keys:
             task = self.runtime.trace(key)
             self.assertEqual(task.status.value, 'finished')
@@ -115,13 +101,15 @@ class TestSchedulingRuntime(unittest.TestCase):
 
     def test_bs_result_returns_to_local_child_through_owner_member(self):
         keys = self.register()
-        run_online_schedule(self.runtime, {self.member: keys},
-                            lambda key: PlacementDecision(self.bs if key.node_id == 0 else self.ground))
+        self.runtime.submit_placements({keys[0]: PlacementDecision(self.bs), keys[1]: PlacementDecision(self.ground)})
+        self.runtime.finish_slot()
         parent, child = (self.runtime.trace(key) for key in keys)
         self.assertEqual(child.status.value, 'finished')
         self.assertEqual(len(child.predecessor_records[parent.key].transfer_ids), 2)
-        self.assertIn(DirectedChannelKey(self.bs, self.member), self.runtime.channels)
-        self.assertIn(DirectedChannelKey(self.member, self.ground), self.runtime.channels)
+        first, second = (self.runtime.transfer_jobs[tid] for tid in child.predecessor_records[parent.key].transfer_ids)
+        self.assertEqual(first.start_at, parent.compute_finish_at)
+        self.assertEqual(second.start_at, first.finish_at)
+        self.assertEqual(child.compute_start_at, second.finish_at)
 
 
 if __name__ == '__main__':

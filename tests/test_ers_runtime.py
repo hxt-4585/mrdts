@@ -4,7 +4,7 @@ import unittest
 
 from env.types import DirectedChannelKey
 from env.contracts import DAGRequest, PlacementDecision
-from methods.random.ers import ERS
+from scripts.ers import ERS
 from methods.scheduling import run_online_schedule
 from tests.test_ers import make_dag, make_runtime
 from tests.test_serial_runtime import make_runtime as make_parallel_runtime, request

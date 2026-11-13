@@ -14,7 +14,6 @@ class TaskStatus(str, Enum):
     QUEUED_COMPUTE = "queued_compute"
     RUNNING = "running"
     FINISHED = "finished"
-    FAILED = "failed"
 
 
 @dataclass
@@ -31,6 +30,7 @@ class TaskRuntime:
     cpu_cycles: float
     input_bits: float
     predecessors: set[TaskKey]
+    schedule_index: int = field(default=0, init=False)  # 本窗方案中的次序；自动本地任务按 TaskKey 打破平局。
     execution_node: EntityRef | None = None
     decision_at: float | None = None
     status: TaskStatus = field(default=TaskStatus.UNSCHEDULED, init=False)
@@ -45,11 +45,7 @@ class TaskRuntime:
     execution_core_id: int | None = None
     compute_energy_j: float = 0.0
     member_energy_j: np.ndarray | None = None  # 当前任务的逐 Member 计算与发送能耗。
-    energy_virtual_queue_j: np.ndarray | None = None  # 完成时快照，尚未扣时隙预算。
-    failed_at: float | None = None
     unfinished_dags_at_decision: int | None = None
-    unfinished_region_dags_at_decision: int | None = None  # 决策时 owner 所在区域的未完成 DAG 总数。
-    managed_dag_count: int | None = None
 
     def mark_input_arrived(self, at: float) -> bool:
         self.input_arrival_at = float(at)

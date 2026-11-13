@@ -16,7 +16,7 @@ class TestServerState(unittest.TestCase):
         started = server.dispatch(0.0)
 
         self.assertEqual([record.task_key for record in started], tasks[:2])
-        self.assertEqual(server.queued_task_keys, (tasks[2],))
+        self.assertEqual(tuple(item.task_key for item in server.queue), (tasks[2],))
 
     def test_later_arrival_never_bypasses_existing_fifo_head(self):
         server = ServerState(EntityRef(EntityKind.MEMBER_UAV, 0), (10.0,), 0.1)
@@ -26,7 +26,7 @@ class TestServerState(unittest.TestCase):
         running = server.dispatch(0.0)[0]
         server.enqueue(second, cpu_cycles=10.0, ready_at=0.1)
 
-        server.finish(running.core_id, 1.0)
+        server.finish(running.core_id)
         started = server.dispatch(1.0)
 
         self.assertEqual(started[0].task_key, second)
@@ -40,19 +40,19 @@ class TestServerState(unittest.TestCase):
         server.dispatch(10.)
         for task, cycles in zip(tasks[2:], (40., 10.)):
             server.enqueue(task, cycles, 10.)
-        queued = server.queued_task_keys
+        queued = tuple(item.task_key for item in server.queue)
         running = server.running.copy()
 
         self.assertEqual(server.compute_wait(10.), 6.)
         self.assertEqual(server.compute_wait(11.), 5.)
-        self.assertEqual(server.queued_task_keys, queued)
+        self.assertEqual(tuple(item.task_key for item in server.queue), queued)
         self.assertEqual(server.running, running)
 
         # 将假想任务实际入队，用真实派发结果核对预测。
         server.enqueue(tasks[4], 10., 10.)
         for at, cores in ((12., (0,)), (15., (1,)), (16., (0, 1))):
             for core_id in cores:
-                server.finish(core_id, at)
+                server.finish(core_id)
             started = server.dispatch(at)
         self.assertEqual(started[0].task_key, tasks[4])
         self.assertEqual(started[0].start_at, 16.)
@@ -82,10 +82,10 @@ class TestServerState(unittest.TestCase):
         self.assertEqual(server.compute_wait(10.), 10.)
         server.enqueue(tasks[3], 10., 10.)
         server.dispatch(10.)
-        server.finish(0, 10.)
+        server.finish(0)
         server.dispatch(10.)
         for core_id in (0, 1):
-            server.finish(core_id, 20.)
+            server.finish(core_id)
         self.assertEqual(server.dispatch(20.)[0].task_key, tasks[3])
 
 

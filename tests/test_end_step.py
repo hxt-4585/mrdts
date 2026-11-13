@@ -8,94 +8,29 @@ import numpy as np
 
 from env.contracts import PlacementDecision
 from env.env import MRDTSEnv
-from env.step.reward import MasterReward, MemberReward
+from env.step.reward import MasterReward
 from env.types import EntityKind, EntityRef
 from tests import test_mrdts_env
 from tests.test_serial_runtime import request
 
 
 class TestEndStep(unittest.TestCase):
-    def test_member_completion_metrics_keep_pre_budget_queue_snapshot(self):
-        env = self.make_environment(duration=2.)
-        count = env.members.member_uav_count
-        owner = EntityRef(EntityKind.MEMBER_UAV, 0)
-        executor = EntityRef(EntityKind.MEMBER_UAV, 1)
-        ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
-        frequency = env.members.config.member_core_frequency
-        dag = request(owner, ground, inputs=(0., 0.), cycles=(.25 * frequency,) * 2)
-        env.members.energy_virtual_queue_j[:] = 10.
-        with patch.object(env, '_generate_dag_requests', return_value=(dag,)):
-            env.begin_step(np.zeros((count, 2)))
-        runtime = env._runtime
-        after_flight = env.members.energy_virtual_queue_j.copy()
-        hover_power = float(env.members.propulsion_power(0.))
-        compute = env.members.config.member_capacitance_factor * .25 * frequency**3
-        env.submit_schedule({dag.task_keys[0]: PlacementDecision(executor)})
-        metrics = env.pop_member_rewards()[dag.task_keys[0]]
-        self.assertIsInstance(metrics, MemberReward)
-        expected_queue = after_flight + hover_power * .25
-        expected_queue[1] += compute
-        np.testing.assert_allclose(metrics.compute_energy_queue(), expected_queue)
-        expected_energy = np.zeros(count)
-        expected_energy[1] = compute
-        np.testing.assert_allclose(metrics.compute_energy(), expected_energy)
-        self.assertEqual(metrics.compute_delay(), -.125)
-        self.assertEqual(env.pop_member_rewards(), {})
-        env.submit_schedule({dag.task_keys[1]: PlacementDecision(owner)})
-        end = env.end_step()
-        self.assertEqual(set(end.member_rewards), {dag.task_keys[1]})
-        final_metrics = end.member_rewards[dag.task_keys[1]]
-        self.assertEqual(final_metrics.compute_delay(), -.125)
-        expected_final = after_flight + hover_power * .5
-        expected_final[[0, 1]] += compute
-        np.testing.assert_allclose(final_metrics.compute_energy_queue(), expected_final)
-        np.testing.assert_allclose(metrics.compute_energy_queue(), expected_queue)
-        self.assertFalse(np.shares_memory(metrics.compute_energy_queue(),
-                                         env.members.energy_virtual_queue_j))
-        env.reset(epoch_index=0)
-        np.testing.assert_allclose(final_metrics.compute_energy_queue(), expected_final)
-
-    def test_simultaneous_completions_see_all_energy_at_that_time(self):
-        env = self.make_environment(duration=1.)
-        count = env.members.member_uav_count
-        owners = [EntityRef(EntityKind.MEMBER_UAV, i) for i in (0, 1)]
-        cycles = .25 * env.members.config.member_core_frequency
-        dags = tuple(request(owner, EntityRef(EntityKind.GROUND_DEVICE, i), cycles=(cycles,))
-                     for i, owner in enumerate(owners))
-        with patch.object(env, '_generate_dag_requests', return_value=dags):
-            env.begin_step(np.zeros((count, 2)))
-        env.submit_schedule({dag.task_keys[0]: PlacementDecision(owner)
-                             for dag, owner in zip(dags, owners)})
-        expected = env.members.energy_virtual_queue_j.copy()
-        results = env.pop_member_rewards()
-        self.assertEqual(len(results), 2)
-        for metrics in results.values():
-            np.testing.assert_allclose(metrics.compute_energy_queue(), expected)
-
-    def test_member_rewards_are_drained_online_or_preserved_at_end_step(self):
+    def test_member_rewards_settle_once_per_slot(self):
         env = self.make_environment(duration=2.)
         owner = EntityRef(EntityKind.MEMBER_UAV, 0)
         ground = EntityRef(EntityKind.GROUND_DEVICE, 0)
         cycles = env.members.config.member_core_frequency * .25
-        dag = request(owner, ground, inputs=(0., 0.), cycles=(cycles, cycles))
+        dag = request(owner, ground, inputs=(0., 0.), cycles=(cycles, cycles),
+                      edges=((0, 1),), sizes=(0.,))
         actions = np.zeros((env.members.member_uav_count, 2))
         with patch.object(env, "_generate_dag_requests", return_value=(dag,)):
-            env.begin_step(actions)
-        self.assertEqual(env.pop_member_rewards(), {})
-        env.submit_schedule({dag.task_keys[0]: PlacementDecision(owner)})
-        first = env.pop_member_rewards()
-        self.assertEqual(first[dag.task_keys[0]].compute_delay(), -.125)
-        self.assertEqual(env.pop_member_rewards(), {})
-        env.submit_schedule({dag.task_keys[1]: PlacementDecision(owner)})
-        result = env.end_step()
-        self.assertEqual(result.member_rewards[dag.task_keys[1]].compute_delay(), -.125)
-        self.assertEqual(result.master_reward, -.25)
-        with patch.object(env, "_generate_dag_requests", return_value=(dag,)):
-            env.begin_step(actions)
-        self.assertEqual(env.pop_member_rewards(), {})
-        self.assertEqual(env.end_step().member_rewards, {})
-        self.assertEqual(first[dag.task_keys[0]].compute_delay(), -.125)
-        self.assertEqual(result.member_rewards[dag.task_keys[1]].compute_delay(), -.125)
+            for _ in range(2):
+                env.begin_step(actions)
+                env.submit_schedule({key: PlacementDecision(owner) for key in dag.task_keys})
+                result = env.end_step()
+                self.assertEqual({key: r.compute_delay() for key, r in result.member_rewards.items()},
+                                 dict.fromkeys(dag.task_keys, -.125))
+                self.assertEqual(result.master_reward, -.25)
 
     def make_environment(self, *, duration=2., budget=145.):
         settings = test_mrdts_env.TestMRDTSEnv.settings()
@@ -158,7 +93,7 @@ class TestEndStep(unittest.TestCase):
         np.testing.assert_array_equal(members.energy_virtual_queue_j, 0.)
         np.testing.assert_allclose(result.energy_virtual_queue_j, expected_queue)
 
-    def test_completed_compute_updates_observation_then_end_only_deducts_one_budget(self):
+    def test_completed_compute_updates_actual_queue_but_observation_keeps_initial_queue(self):
         env = self.make_environment(duration=2., budget=1000.)
         members = env.members
         count = members.member_uav_count
@@ -181,7 +116,7 @@ class TestEndStep(unittest.TestCase):
         expected[1] += compute_energy
         np.testing.assert_allclose(members.energy_virtual_queue_j, expected)
         observation = env.observe_member(dag.task_keys[1])
-        self.assertAlmostEqual(observation[4 + 4 * count + 1], expected[1] / 1000.)
+        self.assertAlmostEqual(observation[4 + 4 * count + 1], after_flight[1] / 1000.)
         self.assertEqual(env.submit_schedule({dag.task_keys[1]: PlacementDecision(ground)}), ())
         result = env.end_step()
         self.assertEqual(result.slot_result.finished_dags, (dag.key,))
@@ -212,7 +147,7 @@ class TestEndStep(unittest.TestCase):
         np.testing.assert_allclose(result.energy_virtual_queue_j, np.maximum(0., before - 145.))
         reward = MasterReward(env.env_config.scheduling_duration_s)
         energy = reward.compute_energy(result)
-        queues = reward.compute_energy_queue(result)
+        queues = result.energy_virtual_queue_j
         np.testing.assert_allclose(
             energy,
             result.flight_energy_j + result.hover_energy_j
@@ -225,7 +160,7 @@ class TestEndStep(unittest.TestCase):
         self.assertEqual(reward.compute_delay(result.slot_result), -2.)
         env.reset(epoch_index=0)
         np.testing.assert_allclose(
-            reward.compute_energy_queue(result), np.maximum(0., initial_queue + energy - 145.),
+            result.energy_virtual_queue_j, np.maximum(0., initial_queue + energy - 145.),
         )
 
 

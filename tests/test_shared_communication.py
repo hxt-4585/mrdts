@@ -36,7 +36,6 @@ class TestSharedCommunication(unittest.TestCase):
                       cycles=(100., 100.), edges=((0, 1),), sizes=(1.,))
         # 仅测试输入传输；尚未到达的前驱结果使任务不进入计算。
         key = self.runtime.register_dags([dag])[1]
-        self.runtime._ready_members.clear()
         task = self.runtime.trace(key)
         task.execution_node = targets[-1]
         task.input_arrival_at = None
@@ -65,7 +64,7 @@ class TestSharedCommunication(unittest.TestCase):
         self.assertAlmostEqual(runtime.finish_slot().tx_energy_j, 9.)
 
     def test_coincident_member_transfer_finishes_and_releases_bandwidth(self):
-        self.runtime.update_entity_positions({self.b: self.runtime.entity_positions[self.a]})
+        self.runtime.entity_positions[self.b] = self.runtime.entity_positions[self.a].copy()
         fast_record, (fast,) = self.send(self.a, (self.b,), 500_000.)
         _, (slow,) = self.send(self.a, (self.c,), 24e6)
         finish = fast.predicted_finish_at
@@ -130,18 +129,57 @@ class TestSharedCommunication(unittest.TestCase):
         outcomes = []
         for reverse in (False, True):
             runtime, members, grounds, bs = make_runtime()
-            dags = [request(m, g, inputs=(1., 0.), cycles=(10., 10.))
+            dags = [request(m, g, inputs=(1.,), cycles=(10.,))
                     for m, g in zip(members[:2], grounds[:2])]
             runtime.register_dags(dags)
             placements = {d.task_keys[0]: PlacementDecision(d.owner_member)
                           for d in (reversed(dags) if reverse else dags)}
             runtime.submit_placements(placements)
-            self.assertEqual(runtime.advance_to_decision(), (0, 1))
+            runtime.finish_slot()
             # 两个发送端各用完整功率，带宽减半：上传耗时 2/log2(3)。
-            self.assertAlmostEqual(runtime.now, 1. + 2. / math.log2(3.))
+            for dag in dags:
+                self.assertAlmostEqual(runtime.trace(dag.task_keys[0]).compute_finish_at,
+                                       1. + 2. / math.log2(3.))
             outcomes.append([(runtime.trace(d.task_keys[0]).input_arrival_at,
                               runtime.trace(d.task_keys[0]).compute_finish_at) for d in dags])
         self.assertEqual(*outcomes)
+
+    def test_reallocation_finishing_at_now_competes_for_core_in_placement_order(self):
+        runtime, members, grounds, _ = make_runtime(slot_start=10.)
+        # 共享带宽时 A 的预测晚一个浮点间隔；B 完成后 A 的新预测恰好等于当前时刻。
+        runtime.transmit_powers[grounds[0]] = 0.9999999999999979
+        dags = [request(members[0], ground, inputs=(1.,), cycles=(10.,)) for ground in grounds[:2]]
+        a, b = runtime.register_dags(dags)
+        runtime.submit_placements({key: PlacementDecision(members[0]) for key in (a, b)})
+        first, second = (runtime.transfer_jobs[runtime.trace(k).input_record.transfer_ids[0]] for k in (a, b))
+        at = second.predicted_finish_at
+        self.assertGreater(first.predicted_finish_at, at)
+        runtime.advance_until(at)
+        self.assertEqual((runtime.trace(a).data_ready_at, runtime.trace(b).data_ready_at), (at, at))
+        self.assertEqual(runtime.trace(a).compute_start_at, at)
+        self.assertIsNone(runtime.trace(b).compute_start_at)
+        runtime.finish_slot()
+        self.assertEqual(runtime.trace(b).compute_start_at, at + 1.)
+
+    def test_same_time_relay_hops_released_by_zero_compute_compete_for_core(self):
+        at = 10.
+        runtime, members, grounds, bs = make_runtime(slot_start=at)
+        # 两跳的正传输时间都小于 at 的一个浮点间隔。
+        dag = request(members[0], grounds[0], inputs=(0., 0., 0.), cycles=(0., 10., 10.),
+                      edges=((0, 1),), sizes=(1.e-18,))
+        parent, a, b = runtime.register_dags([dag])
+        runtime.submit_placements({parent: PlacementDecision(grounds[0]),
+                                   a: PlacementDecision(bs), b: PlacementDecision(bs)})
+        edge = runtime.trace(a).predecessor_records[parent]
+        self.assertEqual(len(edge.transfer_ids), 2)
+        for transfer_id in edge.transfer_ids:
+            hop = runtime.transfer_jobs[transfer_id]
+            self.assertEqual((hop.source_ready_at, hop.start_at, hop.finish_at), (at, at, at))
+        self.assertEqual((runtime.trace(a).data_ready_at, runtime.trace(b).data_ready_at), (at, at))
+        self.assertEqual(runtime.trace(a).compute_start_at, at)
+        self.assertIsNone(runtime.trace(b).compute_start_at)
+        runtime.finish_slot()
+        self.assertEqual(runtime.trace(b).compute_start_at, at + 1.)
 
     def test_observation_time_splits_do_not_double_count_progress_or_energy(self):
         first, (ab,) = self.send(self.a, (self.b,), 24e6)

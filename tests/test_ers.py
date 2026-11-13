@@ -26,7 +26,7 @@ def make_runtime(*, asymmetric=False):
         {ground: ServerSpec((1e9,), 0.), member: ServerSpec((10e9, 10e9), 1e-28),
          bs: ServerSpec((12e9,) * 4, 1e-28)},
         powers,
-        member_regions={member: 1}, ground_owner_members={ground: member})
+        member_regions={member: 1})
     return runtime, ground, member, bs
 
 
@@ -105,16 +105,6 @@ class TestERS(unittest.TestCase):
         self.assertEqual(plan.member_orders[member], expected)
         self.assertEqual(ERS(runtime).plan([b, a]).order, expected)
 
-    def test_replanning_reads_updated_positions(self):
-        runtime, ground, member, bs = make_runtime()
-        ers = ERS(runtime)
-        request = DAGRequest(0, make_dag(), member, ground)
-        old = ers.average_costs(request)
-        runtime.update_entity_positions({member: np.array([300., 0., 100.])})
-        new = ers.average_costs(request)
-        self.assertNotEqual(old.average_edge_comm_s, new.average_edge_comm_s)
-        self.assertGreater(new.path_seconds_per_bit[ground, bs], old.path_seconds_per_bit[ground, bs])
-
     def test_candidates_exclude_other_users_and_other_regions(self):
         runtime, ground, member, bs = make_runtime()
         other_ground = EntityRef(EntityKind.GROUND_DEVICE, 1)
@@ -125,8 +115,7 @@ class TestERS(unittest.TestCase):
         servers.update({other_ground: ServerSpec((1e9,), 0.), remote: ServerSpec((1e9,) * 50, 1e-28)})
         extended = SchedulingRuntime(runtime.channel_model, positions, servers,
                                      {node: 1. for node in positions},
-                                     member_regions={member: 1, remote: 2},
-                                     ground_owner_members={ground: member, other_ground: remote})
+                                     member_regions={member: 1, remote: 2})
         costs = ERS(extended).average_costs(DAGRequest(0, make_dag(), member, ground))
         self.assertEqual(set(costs.candidates), {ground, member, bs})
         self.assertAlmostEqual(costs.average_edge_comm_s[(0, 1)], weighted_comm(extended, ground, member, bs, 1e6))
@@ -148,8 +137,7 @@ class TestERS(unittest.TestCase):
         servers[other_ground] = ServerSpec((1e9,), 0.)
         extended = SchedulingRuntime(runtime.channel_model, positions, servers,
                                      {node: 1. for node in positions},
-                                     member_regions={member: 1},
-                                     ground_owner_members={ground: member, other_ground: member})
+                                     member_regions={member: 1})
         requests = [DAGRequest(0, make_dag(), member, user) for user in (ground, other_ground)]
         plan = ERS(extended).plan(requests)
         self.assertEqual(len(plan.order), 4)

@@ -14,6 +14,6 @@ transmit_power = 0.3
 
 [computation]
 # 每台地面设备的计算核心数。
-core_count = 4
+core_count = 2
 # 每个地面设备计算核心的频率（CPU cycles/s）。
-core_frequency = 1200000000.0
+core_frequency = 1000000000.0

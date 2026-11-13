@@ -32,7 +32,7 @@ def make_runtime(duration=30.0, cores=1, **runtime_options):
         model, positions, {node: ServerSpec((10.,) * cores, .01) for node in positions},
         {node: 1. for node in positions},
         member_regions={node: 1 for node in members},
-        ground_owner_members=dict(zip(grounds, members)), max_duration_s=duration,
+        max_duration_s=duration,
         **runtime_options,
     )
     return runtime, members, grounds, bs
@@ -206,7 +206,6 @@ class TestSerialRuntime(unittest.TestCase):
         self.assertAlmostEqual(result.slot_end, 5.)
         self.assertAlmostEqual(result.compute_energy_j, 20.)
         self.assertAlmostEqual(result.tx_energy_j, 2.)
-        self.assertTrue(all(runtime.trace(key).failed_at is None for key in (parent, child)))
 
     def test_completion_deadline_is_checked_per_dag_from_nonzero_slot_start(self):
         runtime, members, grounds, bs = make_runtime(duration=1., slot_start=10.)

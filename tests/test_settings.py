@@ -1,5 +1,6 @@
 """外部配置加载的单元测试。"""
 
+from dataclasses import asdict
 from pathlib import Path
 import random
 import tomllib
@@ -28,12 +29,12 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(config.region_count, 4)
 
     def test_env_config_loads_slot_durations_epoch_steps_and_seed(self):
-        config = EnvConfig.from_toml(PROJECT_ROOT / "config" / "env.toml")
+        path = PROJECT_ROOT / "config" / "env.toml"
+        config = EnvConfig.from_toml(path)
+        with path.open("rb") as file:
+            expected = tomllib.load(file)["env"]
 
-        self.assertEqual(config.flight_duration_s, 0.5)
-        self.assertEqual(config.scheduling_duration_s, 1.0)
-        self.assertEqual(config.steps_per_epoch, 500)
-        self.assertEqual(config.env_seed, 42)
+        self.assertEqual(asdict(config), expected)
         self.assertEqual(EnvConfig.default(), config)
 
     def test_channel_config_loads_link_and_propagation_parameters(self):
@@ -51,18 +52,19 @@ class TestSettings(unittest.TestCase):
 
     def test_uav_config_loads_member_energy_and_communication_parameters(self):
         """推进、计算与通信参数应只作为 Member UAV 的类型化配置加载。"""
-        config = UAVConfig.from_toml(PROJECT_ROOT / "config" / "uav.toml")
+        path = PROJECT_ROOT / "config" / "uav.toml"
+        config = UAVConfig.from_toml(path)
+        with path.open("rb") as file:
+            expected = tomllib.load(file)
+        member = expected["member"]
 
-        self.assertEqual(config.member_propulsion.u1, 85.0)
-        self.assertEqual(config.member_propulsion.u2, 0.131)
-        self.assertEqual(config.member_propulsion.u3, 0.16)
-        self.assertEqual(config.member_propulsion.u4, 0.0115)
-        self.assertFalse(hasattr(config.member_propulsion, "u5"))
-        self.assertEqual(config.member_propulsion.tip_speed, 110.0)
-        self.assertEqual(config.member_capacitance_factor, 1e-28)
-        self.assertEqual(config.member_coverage_radius, 180.0)
-        self.assertEqual(config.member_transmit_power, 1.0)
-        self.assertEqual(config.bs_transmit_power, 1.0)
+        self.assertEqual(asdict(config.member_propulsion), {
+            key: member[key] for key in ("u1", "u2", "u3", "u4", "tip_speed")
+        })
+        self.assertEqual(config.member_capacitance_factor, member["capacitance_factor"])
+        self.assertEqual(config.member_coverage_radius, member["coverage_radius"])
+        self.assertEqual(config.member_transmit_power, member["transmit_power"])
+        self.assertEqual(config.bs_transmit_power, expected["bs"]["transmit_power"])
 
     def test_member_physical_parameters_are_not_nested_in_toml_groups(self):
         """Member 的物理参数应直接位于 [member]，便于统一查阅。"""
@@ -73,10 +75,8 @@ class TestSettings(unittest.TestCase):
         self.assertNotIn("computation", member)
         self.assertNotIn("communication", member)
         self.assertNotIn("u5", member)
-        self.assertEqual(member["u1"], 85.0)
-        self.assertEqual(member["capacitance_factor"], 1e-28)
-        self.assertEqual(member["coverage_radius"], 180.0)
-        self.assertEqual(member["transmit_power"], 1.0)
+        for key in ("u1", "capacitance_factor", "coverage_radius", "transmit_power"):
+            self.assertIn(key, member)
 
     def test_entity_and_workload_configs_do_not_define_seed(self):
         from dataclasses import fields

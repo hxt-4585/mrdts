@@ -28,7 +28,7 @@ class TestUAVDistributionDrawing(unittest.TestCase):
         masters = MasterUAV()
         masters.generate_from_region(region)
         members = MemberUAV()
-        members.generate_from_region_and_user(region, users, masters)
+        members.generate_from_region_and_user(region, masters)
         fig, ax = plt.subplots()
         try:
             artists = draw_uav_distribution(region, users, masters, members, ax)

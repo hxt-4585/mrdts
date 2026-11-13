@@ -38,10 +38,9 @@ class DAGRequest:
 
 @dataclass(frozen=True)
 class BeginStepResult:
-    """飞行后已登记的工作负载、首次可决策成员及逐 Member 越界标记。"""
+    """用于整窗规划的工作负载及逐 Member 越界标记。"""
 
     requests: tuple[DAGRequest, ...]
-    ready_member_ids: tuple[int, ...]
     flight_violations: np.ndarray
 
 
@@ -58,7 +57,7 @@ class EndStepResult:
     energy_virtual_queue_j: np.ndarray
     epoch_done: bool
     scheduling_duration_s: float  # 名义调度时隙长度，不随实际完成时刻延长。
-    # 本时隙尚未领取的完成奖励，含末尾任务。
+    # 整窗执行完成后按 TaskKey 返回的子任务奖励。
     member_rewards: dict[TaskKey, MemberReward] = field(default_factory=dict)
 
     @property

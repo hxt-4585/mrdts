@@ -7,7 +7,7 @@ import numpy as np
 from env.contracts import PlacementDecision
 from env.env import MRDTSEnv
 from env.runtime.task_runtime import TaskStatus
-from methods.random.run import RandomStreams, resolved_settings, run_slot
+from tests import test_mrdts_env
 from tests.test_serial_runtime import make_runtime, request
 
 
@@ -60,7 +60,9 @@ class TestLocalFallback(unittest.TestCase):
         self.assertTrue(all(t.status is TaskStatus.FINISHED for t in runtime.tasks.values()))
 
     def make_env(self, core_count=None):
-        settings = resolved_settings(users=8, dag_nodes=4)
+        settings = test_mrdts_env.TestMRDTSEnv.settings()
+        settings["user"] = replace(settings["user"], total_users=8)
+        settings["dag"] = replace(settings["dag"], n=4)
         if core_count is not None:
             settings["user"] = replace(settings["user"], core_count=core_count)
         environment = MRDTSEnv(settings)
@@ -69,16 +71,6 @@ class TestLocalFallback(unittest.TestCase):
         # 将所有 Member 移入区域 1，其他区域保留原用户。
         environment.members.positions[:-1, :2] = environment.masters.positions[0, :2]
         return environment
-
-    def test_empty_regions_complete_in_random_baseline(self):
-        environment = self.make_env()
-        result, _ = run_slot(environment, RandomStreams())
-        self.assertEqual(len(result.finished_dags), environment.users.num_users)
-        local_users = set(np.flatnonzero(environment.user_member_ids == -1))
-        self.assertTrue(local_users)
-        local_results = [d for d in result.dags if d.key[1] in local_users]
-        self.assertEqual(len(local_results), len(local_users))
-        self.assertTrue(all(d.key[0] == -1 for d in local_results))
 
     def test_all_users_local_settle_reward_hover_and_next_slot_reassociation(self):
         environment = self.make_env(core_count=1)

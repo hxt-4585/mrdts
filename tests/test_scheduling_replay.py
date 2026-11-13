@@ -3,6 +3,8 @@
 import importlib.util
 import unittest
 
+from env.settings import EnvConfig, RegionConfig, UserConfig
+
 
 class TestSchedulingReplay(unittest.TestCase):
     def build(self, **kwargs):
@@ -15,33 +17,44 @@ class TestSchedulingReplay(unittest.TestCase):
 
     def test_small_scene_and_real_ground_routing(self):
         data = self.build()
-        self.assertEqual(len(data["dags"]), 4)
-        self.assertEqual(len(data["tasks"]), 16)
-        self.assertEqual(data["summary"]["finished_dags"], 4)
-        self.assertEqual(data["summary"]["failed_dags"], 0)
-        for region in range(1, 5):
+        region_count = RegionConfig.default().region_count
+        ground_config = UserConfig.default()
+        deadline = data["meta"]["slot_start"] + EnvConfig.default().scheduling_duration_s
+        self.assertEqual(data["meta"]["deadline"], deadline)
+        self.assertEqual(len(data["dags"]), region_count)
+        self.assertEqual(len(data["tasks"]), 4 * region_count)
+        finished_dags = 0
+        for region in range(1, region_count + 1):
             entities = [e for e in data["entities"] if e["region"] == region]
             self.assertEqual(sum(e["kind"] == "ground_device" for e in entities), 1)
             self.assertEqual(sum(e["kind"] == "member_uav" for e in entities), 2)
             tasks = [t for t in data["tasks"] if t["region"] == region]
             ground = next(e for e in entities if e["kind"] == "ground_device")
-            self.assertEqual(ground["frequencies_hz"], [1e9])
+            self.assertEqual(ground["frequencies_hz"], [ground_config.core_frequency] * ground_config.core_count)
             local = next(t for t in tasks if t["node"] == 1)
             self.assertIn("input_kbit", local)
             self.assertNotIn("input_kb", local)
             self.assertEqual(local["input_arrival"], local["decision_at"])
-            self.assertGreater(local["decision_at"], 0.0)
+            self.assertTrue(all(t["decision_at"] == data["meta"]["slot_start"] for t in tasks))
+            self.assertGreater(local["start"], local["input_arrival"])
             self.assertEqual(local["compute_energy_j"], 0.0)
-            self.assertAlmostEqual(local["finish"] - local["start"], local["cycles"] / 1e9)
+            self.assertAlmostEqual(local["finish"] - local["start"], local["cycles"] / ground_config.core_frequency)
             self.assertFalse(any(x["task"] == local["id"] and x["kind"] == "input"
                                  for x in data["transfers"]))
             dag = next(d for d in data["dags"] if d["region"] == region)
+            completion = max(t["finish"] for t in tasks)
+            self.assertEqual(dag["completion"], completion)
+            self.assertEqual(dag["failed"], completion > deadline)
+            finished_dags += int(completion <= deadline)
             self.assertTrue(all("kbit" in edge and "kb" not in edge for edge in dag["edges"]))
+            sink = next(t for t in tasks if t["node"] == 3)
             ground_result = sorted(
-                (x for x in data["transfers"] if x["task"] == tasks[3]["id"]
+                (x for x in data["transfers"] if x["task"] == sink["id"]
                  and x["predecessor"] == local["id"]), key=lambda x: x["hop"])
             self.assertEqual([(x["source"], x["target"]) for x in ground_result],
                              [(ground["id"], dag["owner"]), (dag["owner"], "bs")])
+        self.assertEqual(data["summary"]["finished_dags"], finished_dags)
+        self.assertEqual(data["summary"]["failed_dags"], region_count - finished_dags)
 
     def test_transfer_intervals_obey_real_source_readiness_and_serial_channels(self):
         data = self.build()
@@ -78,7 +91,7 @@ class TestSchedulingReplay(unittest.TestCase):
         self.assertEqual(data["summary"]["finished_dags"], 0)
         self.assertGreater(data["meta"]["slot_end"], data["meta"]["deadline"])
         self.assertTrue(all(x["completed"] for x in data["transfers"]))
-        self.assertTrue(all(t["finish"] is not None and t["failed_at"] is None
+        self.assertTrue(all(t["finish"] is not None
                             for t in data["tasks"]))
         self.assertTrue(all(e["at"] <= data["meta"]["slot_end"] for e in data["events"]))
         self.assertTrue(any(e["at"] > data["meta"]["deadline"] for e in data["events"]))

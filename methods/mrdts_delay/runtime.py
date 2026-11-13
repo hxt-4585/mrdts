@@ -1,5 +1,6 @@
-"""Environment construction, ERS ordering and event-driven PPO rollouts."""
+"""Environment construction, ERS ordering and whole-slot PPO rollouts."""
 from dataclasses import replace
+from itertools import zip_longest
 import math
 
 import numpy as np
@@ -33,7 +34,7 @@ def build_environment(settings):
     return env
 
 
-def execution_orders(runtime, requests):
+def execution_order(runtime, requests):
     """Core-weighted upward ranks; topological positions resolve equal-rank ties."""
     estimates, hop_times, ranking = {}, {}, []
     for request in sorted(requests, key=lambda item: item.key):
@@ -74,44 +75,38 @@ def execution_orders(runtime, requests):
     orders = {}
     for _, owner, user, dag, _, node in sorted(ranking):
         orders.setdefault(owner, []).append(TaskKey(owner, user, dag, node))
-    return {owner: iter(keys) for owner, keys in orders.items()}
+    # Interleave local ERS sequences in Member ID order for shared-resource ties.
+    rounds = zip_longest(*(orders[owner] for owner in sorted(orders)))
+    return (key for group in rounds for key in group if key is not None)
 
 
 def run_slot(env, low, actions, config, deterministic=False):
     count = env.members.member_uav_count
     trajectories = [[] for _ in range(count)]
     begin = env.begin_step(actions)
-    orders = execution_orders(env._runtime, begin.requests)
     regions = env.members.region_ids[:count]
-    valid_members = regions[:, None] == regions[None, :]
-    ready, pending = begin.ready_member_ids, {}
-    while ready:
-        # Read every observation before making any placement in this event batch.
-        decisions = []
-        for member in ready:
-            key = next(orders[member])
-            x = member_input(env.observe_member(key), count)
-            mask = np.ones(count + 2, dtype=bool)
-            mask[:count] = valid_members[member]
-            decisions.append((member, key, x, mask))
-        placements = {}
-        for member, key, x, mask in decisions:
-            sample = low.act(member, x, mask, deterministic)
-            trajectories[member].append(sample)
-            pending[key] = sample
-            if sample.action < count:
-                node = EntityRef(EntityKind.MEMBER_UAV, sample.action)
-            elif sample.action == count:
-                node = EntityRef(EntityKind.BS, 0)
-            else:
-                node = EntityRef(EntityKind.GROUND_DEVICE, key.user_id)
-            placements[key] = PlacementDecision(node)
-        ready = env.submit_schedule(placements)
-        for key, reward in env.pop_member_rewards().items():
-            pending.pop(key).reward = reward.compute_delay()
+    masks = np.ones((count, count + 2), dtype=bool)
+    masks[:, :count] = regions[:, None] == regions[None, :]
+    placements = {}
+    samples = {}
+    for key in execution_order(env._runtime, begin.requests):
+        member = key.owner_member_id
+        observation = member_input(env.observe_member(key, placements), count)
+        sample = low.act(member, observation, masks[member], deterministic)
+        trajectories[member].append(sample)
+        samples[key] = sample
+        if sample.action < count:
+            node = EntityRef(EntityKind.MEMBER_UAV, sample.action)
+        elif sample.action == count:
+            node = EntityRef(EntityKind.BS, 0)
+        else:
+            node = EntityRef(EntityKind.GROUND_DEVICE, key.user_id)
+        placements[key] = PlacementDecision(node)
+
+    env.submit_schedule(placements)
     result = env.end_step()
-    for key, reward in result.member_rewards.items():
-        pending.pop(key).reward = reward.compute_delay()
+    for key, sample in samples.items():
+        sample.reward = result.member_rewards[key].compute_delay()
     for trajectory in trajectories:
         advantages(trajectory, config['member_gamma'], config['gae_lambda'])
     slot = result.slot_result

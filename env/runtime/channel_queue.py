@@ -1,8 +1,9 @@
 """同一有向实体对上的严格串行传输队列。"""
 
-from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
+import heapq
+from itertools import count
 
 from env.types import DirectedChannelKey
 
@@ -15,7 +16,7 @@ class TransferStatus(str, Enum):
 
 @dataclass
 class TransferJob:
-    """单次传输持续占用 FIFO 队首，资源份额可变；finish_at 仅记录实际完成。"""
+    """传输启动后持续占用信道，资源份额可变；finish_at 仅记录实际完成。"""
 
     transfer_id: str
     source_ready_at: float | None
@@ -40,24 +41,30 @@ class TransferJob:
 
 @dataclass
 class DirectedChannelState:
-    """一个有向信道的 FIFO 队列；仅将源数据已就绪的作业入队。"""
+    """按本跳源数据就绪时间派发传输，同刻按目标子任务的提交顺序派发。"""
 
     key: DirectedChannelKey
-    queued: deque[TransferJob] = field(default_factory=deque)
+    queued: list[tuple[float, int, int, TransferJob]] = field(default_factory=list)
+    _sequence: count = field(default_factory=count, init=False)
     active: TransferJob | None = None
     next_free_at: float = 0.0
 
-    def enqueue(self, job: TransferJob) -> None:
-        self.queued.append(job)
+    def enqueue(self, job: TransferJob, schedule_index: int = 0) -> None:
+        heapq.heappush(self.queued, (job.source_ready_at, schedule_index, next(self._sequence), job))
 
-    def start_head(self, now: float) -> TransferJob | None:
-        now = float(now)
+    def ready_head(self, now: float) -> TransferJob | None:
         if self.active is not None or not self.queued or now < self.next_free_at:
             return None
-        head = self.queued[0]
-        if head.source_ready_at is None or head.source_ready_at > now:
+        ready_at, _, _, head = self.queued[0]
+        if ready_at > now:
             return None
-        self.queued.popleft()
+        return head
+
+    def start_head(self, now: float) -> TransferJob | None:
+        head = self.ready_head(now)
+        if head is None:
+            return None
+        heapq.heappop(self.queued)
         head.status = TransferStatus.ACTIVE
         head.start_at = now
         self.active = head

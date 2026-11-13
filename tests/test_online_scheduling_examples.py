@@ -9,7 +9,7 @@ import unittest
 import math
 
 from env.contracts import PlacementDecision
-from methods.random.ers import ERS
+from scripts.ers import ERS
 from methods.scheduling import run_online_schedule
 from tests.test_serial_runtime import make_runtime, request
 

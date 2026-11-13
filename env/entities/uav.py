@@ -25,10 +25,6 @@ class UAV:
         """按 UAV 索引批量更新三维位置。"""
         self.positions[np.asarray(indices)] = np.asarray(positions, dtype=np.float32)
 
-    def update_region_ids(self, indices, region_ids):
-        """按 UAV 索引批量更新区域编号。"""
-        self.region_ids[np.asarray(indices)] = np.asarray(region_ids, dtype=np.int32)
-
 
 class MasterUAV(UAV):
     """每个区域一架、位置固定的 Master UAV 集合。"""
@@ -152,7 +148,7 @@ class MemberUAV(UAV):
         ordered = available[np.argsort(squared_distances[available], kind="stable")]
         return positions[ordered[:count]]
 
-    def generate_from_region_and_user(self, region, users, masters):
+    def generate_from_region_and_user(self, region, masters):
         """按区域平均分配数量，位置只由本区域网格和 Master 决定。"""
 
         region_count = region.config.region_count

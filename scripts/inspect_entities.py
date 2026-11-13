@@ -48,7 +48,7 @@ def inspect_default_entities():
     masters = MasterUAV()
     masters.generate_from_region(region)
     members = MemberUAV()
-    members.generate_from_region_and_user(region, users, masters)
+    members.generate_from_region_and_user(region, masters)
 
     _print_entity("User", users, property_names=("num_users",))
     _print_entity("MasterUAV", masters, property_names=("num_uavs",))
